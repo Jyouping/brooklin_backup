@@ -55,27 +55,7 @@ import com.linkedin.datastream.server.dms.DatastreamResources;
 import com.linkedin.datastream.server.dms.DatastreamStore;
 import com.linkedin.datastream.server.dms.ZookeeperBackedDatastreamStore;
 
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_ASSIGNMENT_STRATEGY_FACTORY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_AUTHORIZER_NAME;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_BOOTSTRAP_TYPE;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_CUSTOM_CHECKPOINTING;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_DEDUPER_FACTORY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_NAMES;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_PREFIX;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CSV_METRICS_DIR;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_DIAG_PATH;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_DIAG_PORT;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_ENABLE_EMBEDDED_JETTY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_FACTORY_CLASS_NAME;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_HTTP_PORT;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_SERDE_NAMES;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_SERDE_PREFIX;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_TRANSPORT_PROVIDER_NAMES;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_TRANSPORT_PROVIDER_PREFIX;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.DEFAULT_DEDUPER_FACTORY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.DOMAIN_DEDUPER;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.DOMAIN_DIAG;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.STRATEGY_DOMAIN;
+import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -336,9 +316,19 @@ public class DatastreamServer {
     boolean customCheckpointing =
         Boolean.parseBoolean(connectorProperties.getProperty(CONFIG_CONNECTOR_CUSTOM_CHECKPOINTING, "false"));
 
+    PartitionListenerFactory partitionListenerFactory = null;
+    String partitionListenerClassName = connectorProperties.getProperty(CONFIG_CONNECTOR_PARTITION_LISTENER_FACTORY, "");
+    if (StringUtils.isNotEmpty(partitionListenerClassName)) {
+       partitionListenerFactory = ReflectionUtils.createInstance(partitionListenerClassName);
+      if (partitionListenerFactory == null) {
+        String msg = "Invalid class name or no parameter-less constructor, class=" + partitionListenerClassName;
+        ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, msg, null);
+      }
+    }
+
     String authorizerName = connectorProps.getString(CONFIG_CONNECTOR_AUTHORIZER_NAME, null);
-    _coordinator.addConnector(connectorName, connectorInstance, assignmentStrategy, customCheckpointing,
-        deduper, authorizerName);
+    _coordinator.addConnector(connectorName, connectorInstance, assignmentStrategy, customCheckpointing, deduper,
+        partitionListenerFactory, authorizerName);
 
     LOG.info("Connector loaded successfully. Type: " + connectorName);
   }

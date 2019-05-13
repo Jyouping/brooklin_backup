@@ -30,6 +30,8 @@ public class ConnectorInfo {
 
   private CheckpointProvider _checkpointProvider;
 
+  private PartitionListenerFactory _partitionListenerFactory;
+
   /**
    * Store authorizerName because authorizer might be initialized later
    */
@@ -43,10 +45,12 @@ public class ConnectorInfo {
    * @param customCheckpointing true if {@code connector} uses custom checkpointing
    * @param checkpointProvider Checkpoint provider associated with {@code connector}
    * @param deduper Datastream deduper associated with {@code connector}
+   * @param partitionListenerFactory partition listener factory associated with {@code connector}
    * @param authorizerName Name of the authorizer configured by {@code connector} (if any)
    */
   public ConnectorInfo(String name, Connector connector, AssignmentStrategy strategy, boolean customCheckpointing,
-      CheckpointProvider checkpointProvider, DatastreamDeduper deduper, String authorizerName) {
+      CheckpointProvider checkpointProvider, DatastreamDeduper deduper,
+      PartitionListenerFactory partitionListenerFactory, String authorizerName) {
     _connector = new ConnectorWrapper(name, connector);
     _assignmentStrategy = strategy;
     _customCheckpointing = customCheckpointing;
@@ -57,6 +61,7 @@ public class ConnectorInfo {
     } else {
       _authorizerName = Optional.of(authorizerName);
     }
+    _partitionListenerFactory = partitionListenerFactory;
   }
 
   public ConnectorWrapper getConnector() {
@@ -85,5 +90,9 @@ public class ConnectorInfo {
 
   public CheckpointProvider getCheckpointProvider() {
     return _checkpointProvider;
+  }
+
+  public PartitionListenerFactory getPartitionListenerFactory() {
+    return _partitionListenerFactory;
   }
 }

@@ -72,6 +72,8 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   // List of partitions the task covers.
   private List<Integer> _partitions;
+  private List<String> _partitionsV2;
+
 
   private ZkAdapter _zkAdapter;
 
@@ -88,6 +90,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   @TestOnly
   public DatastreamTaskImpl() {
     _partitions = new ArrayList<>();
+    _partitionsV2 = new ArrayList<>();
   }
 
   /**
@@ -115,6 +118,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
     _taskPrefix = datastream.getMetadata().get(DatastreamMetadataConstants.TASK_PREFIX);
     _id = id;
     _partitions = new ArrayList<>();
+    _partitionsV2 = new ArrayList<>();
     if (partitions != null && partitions.size() > 0) {
       _partitions.addAll(partitions);
     } else {
@@ -132,9 +136,10 @@ public class DatastreamTaskImpl implements DatastreamTask {
     LOG.info("Created new DatastreamTask " + this);
   }
 
-  /**
-   * Get the prefix of the task names that will be created for this datastream.
-   */
+
+    /**
+     * Get the prefix of the task names that will be created for this datastream.
+     */
   public static String getTaskPrefix(Datastream datastream) {
     return datastream.getName();
   }
@@ -182,6 +187,20 @@ public class DatastreamTaskImpl implements DatastreamTask {
   @Override
   public List<Integer> getPartitions() {
     return _partitions;
+  }
+
+  @Override
+  public List<String> getPartitionsV2() {
+    return _partitionsV2;
+  }
+
+  /**
+   * Set partitions (in string) associated with the task
+   * @param partitions List of partitions to associate with task.
+   */
+  public void setPartitionsV2(List<String> partitions) {
+    Validate.notNull(partitions);
+    _partitionsV2 = partitions;
   }
 
   /**
@@ -342,7 +361,8 @@ public class DatastreamTaskImpl implements DatastreamTask {
     }
     DatastreamTaskImpl task = (DatastreamTaskImpl) o;
     return Objects.equals(_connectorType, task._connectorType) && Objects.equals(_id, task._id) && Objects.equals(
-        _taskPrefix, task._taskPrefix) && Objects.equals(_partitions, task._partitions);
+        _taskPrefix, task._taskPrefix) && Objects.equals(_partitions, task._partitions)
+        && Objects.equals(_partitionsV2, task._partitionsV2);
   }
 
   @Override
@@ -353,8 +373,8 @@ public class DatastreamTaskImpl implements DatastreamTask {
   @Override
   public String toString() {
     // toString() is mainly for logging purpose, feel free to modify the content/format
-    return String.format("%s(%s), partitions=%s", getDatastreamTaskName(), _connectorType,
-        LogUtils.logNumberArrayInRange(_partitions));
+    return String.format("%s(%s), partitionsV2=%s, partitions=%s", getDatastreamTaskName(), _connectorType,
+        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions));
   }
 
   public void setZkAdapter(ZkAdapter adapter) {

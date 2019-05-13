@@ -6,6 +6,7 @@
 package com.linkedin.datastream.server;
 
 import java.io.IOException;
+import java.net.Proxy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -143,6 +144,8 @@ public class TestCoordinator {
    */
   @Test
   public void testConnectorStateSetAndGet() throws Exception {
+    Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress("web-proxy.ind.abc.com", 8080));
+    URLConnection connection = new URL(url).openConnection(proxy);
     String testCluster = "testConnectorStateSetAndGet";
     String testConnectorType = "testConnectorType";
 
@@ -190,7 +193,7 @@ public class TestCoordinator {
     };
 
     coordinator.addConnector(testConnectorType, testConnector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.start();
     ZkClient zkClient = new ZkClient(_zkConnectionString);
     //
@@ -236,7 +239,7 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -270,7 +273,7 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -291,7 +294,7 @@ public class TestCoordinator {
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.start();
 
     //
@@ -435,7 +438,7 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -484,19 +487,19 @@ public class TestCoordinator {
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     //Question why the multicast strategy is within one coordinator rather than shared between list of coordinators
     instance1.addConnector(testConnectorType, connector1, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.start();
 
     Coordinator instance3 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector3 = new TestHookConnector("connector3", testConnectorType);
     instance3.addConnector(testConnectorType, connector3, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance3.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -554,7 +557,7 @@ public class TestCoordinator {
     Coordinator instance4 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector4 = new TestHookConnector("connector4", testConnectorType);
     instance4.addConnector(testConnectorType, connector4, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance4.start();
 
     connectors.add(connector4);
@@ -593,7 +596,7 @@ public class TestCoordinator {
     Coordinator coordinator = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     coordinator.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -641,7 +644,7 @@ public class TestCoordinator {
         createCoordinator(_zkConnectionString, testCluster, new Properties(), transportProviderAdminFactory);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     coordinator.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -680,7 +683,7 @@ public class TestCoordinator {
         createCoordinator(_zkConnectionString, testCluster, new Properties(), transportProviderAdminFactory);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     coordinator.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -717,9 +720,9 @@ public class TestCoordinator {
 
     Coordinator coordinator = createCoordinator(_zkConnectionString, testCluster);
     coordinator.addConnector(connectorType1, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.addConnector(connectorType2, connector2, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -769,12 +772,12 @@ public class TestCoordinator {
 
     Coordinator coordinator1 = createCoordinator(_zkConnectionString, testCluster);
     coordinator1.addConnector(connectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator1.start();
 
     Coordinator coordinator2 = createCoordinator(_zkConnectionString, testCluster);
     coordinator2.addConnector(connectorType, connector2, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator2.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -826,16 +829,16 @@ public class TestCoordinator {
 
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     instance1.addConnector(connectorType1, connector11, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.addConnector(connectorType2, connector12, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     instance2.addConnector(connectorType1, connector21, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.addConnector(connectorType2, connector22, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -949,14 +952,14 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
 
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.start();
 
     String[] datastreamNames = new String[concurrencyLevel];
@@ -998,7 +1001,7 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance1.start();
 
     LOG.info("Creating two datastream");
@@ -1022,7 +1025,7 @@ public class TestCoordinator {
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance2.start();
 
     //
@@ -1039,7 +1042,7 @@ public class TestCoordinator {
     Coordinator instance3 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector3 = new TestHookConnector("connector3", testConnectorType);
     instance3.addConnector(testConnectorType, connector3, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance3.start();
 
     //
@@ -1117,14 +1120,14 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance1.start();
 
     // make sure the instance2 can be taken offline cleanly with session expiration
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance2.start();
 
     LOG.info("Create four datastreams");
@@ -1198,14 +1201,14 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     // make sure the instance2 can be taken offline cleanly with session expiration
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.start();
 
     LOG.info("Create two datastreams");
@@ -1280,19 +1283,19 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance1.start();
 
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance2.start();
 
     Coordinator instance3 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector3 = new TestHookConnector("connector3", testConnectorType);
     instance3.addConnector(testConnectorType, connector3, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance3.start();
 
     LOG.info("Creating six datastreams");
@@ -1391,7 +1394,7 @@ public class TestCoordinator {
       coordinators[i] = createCoordinator(_zkConnectionString, testCluster);
       connectors[i] = new TestHookConnector("connector" + i, testConnectorType);
       coordinators[i].addConnector(testConnectorType, connectors[i], new LoadbalancingStrategy(), false,
-          new SourceBasedDeduper(), null);
+          new SourceBasedDeduper(), null, null);
       coordinators[i].start();
     }
 
@@ -1459,13 +1462,13 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
     instance1.addConnector(testConnectorType, connector1, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance1.start();
 
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
     instance2.addConnector(testConnectorType, connector2, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance2.start();
 
     LOG.info("Create two datastreams.");
@@ -1532,18 +1535,18 @@ public class TestCoordinator {
     TestHookConnector connector1a = new TestHookConnector("connector1a", connectorType1);
     TestHookConnector connector1b = new TestHookConnector("connector1b", connectorType2);
     instance1.addConnector(connectorType1, connector1a, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance1.addConnector(connectorType2, connector1b, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector2a = new TestHookConnector("connector2a", connectorType1);
     TestHookConnector connector2b = new TestHookConnector("connector2b", connectorType2);
     instance2.addConnector(connectorType1, connector2a, new LoadbalancingStrategy(), false, new SourceBasedDeduper(),
-        null);
+        null, null);
     instance2.addConnector(connectorType2, connector2b, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance2.start();
 
     LOG.info("Create three datastreams of connectorType1 and three datastreams of connectorType2");
@@ -1586,7 +1589,7 @@ public class TestCoordinator {
     Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
     BadConnector connector1 = new BadConnector();
     instance1.addConnector(connectorType1, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     instance1.start();
 
     //
@@ -1634,7 +1637,7 @@ public class TestCoordinator {
     Coordinator coordinator = createCoordinator(_zkConnectionString, testCluster);
     TestHookConnector connector = new TestHookConnector("connector1", connectorName);
     coordinator.addConnector(connectorName, connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator.start();
 
     // Create 1st datastream
@@ -1708,7 +1711,7 @@ public class TestCoordinator {
     TestHookConnector connector = new TestHookConnector("connector1", DummyConnector.CONNECTOR_TYPE);
 
     coordinator.addConnector(DummyConnector.CONNECTOR_TYPE, connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
 
     coordinator.start();
 
@@ -2000,7 +2003,7 @@ public class TestCoordinator {
     MMTestHookConnector mmConnector = new MMTestHookConnector("mmConnector", mmConnectorType);
     Coordinator mmCoordinator = createCoordinator(_zkConnectionString, testCluster);
     mmCoordinator.addConnector(mmConnectorType, mmConnector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     mmCoordinator.start();
     ZkClient zkClient = new ZkClient(_zkConnectionString);
 
@@ -2058,7 +2061,7 @@ public class TestCoordinator {
 
     Coordinator nonMmCoordinator = createCoordinator(_zkConnectionString, testCluster);
     nonMmCoordinator.addConnector(nonMmConnectorType, nonMmConnector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     nonMmCoordinator.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);
@@ -2116,7 +2119,7 @@ public class TestCoordinator {
 
     Coordinator coordinator1 = createCoordinator(_zkConnectionString, testCluster);
     coordinator1.addConnector(connectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, null);
     coordinator1.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);

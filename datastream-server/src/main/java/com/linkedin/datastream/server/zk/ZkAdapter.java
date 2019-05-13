@@ -577,6 +577,31 @@ public class ZkAdapter {
     }
   }
 
+  private void updateTaskNode(String instance, DatastreamTaskImpl task) {
+    LOG.info("Updating Task Node: " + instance + ", task: " + task);
+    String name = task.getDatastreamTaskName();
+    //Test: need to know if handle assigned change is fired?
+
+    String instancePath = KeyBuilder.instanceAssignment(_cluster, instance, name);
+    String json = "";
+    try {
+      json = task.toJson();
+    } catch (IOException e) {
+      // This should never happen
+      String errorMessage = "Failed to serialize task into JSON.";
+      ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, errorMessage, e);
+    }
+
+    // Ensure that the instance and instance/Assignment paths are ready before writing the task
+    _zkclient.ensurePath(KeyBuilder.instance(_cluster, instance));
+    _zkclient.ensurePath(KeyBuilder.instanceAssignments(_cluster, instance));
+    try {
+      _zkclient.writeData(instancePath, json);
+    } catch (Exception ex) {
+      String errorMessage = "Failed to update Zk task";
+      ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, errorMessage, ex);
+    }
+  }
   /**
    * Two nodes need to be removed for a removed task:
    * <ol>
@@ -654,6 +679,12 @@ public class ZkAdapter {
     }
   }
 
+  /**
+   * Update the change in assignedTask to zookeeper, i.e. update the znode content, but not path
+   */
+  public void updateAssignedTasks(Map<String, Set<DatastreamTask>> newAssignmentInfo) {
+    newAssignmentInfo.forEach((k, v) -> v.stream().forEach(task -> updateTaskNode(k, (DatastreamTaskImpl) task)));
+  }
   /**
    * Compare the current assignment with the new assignment, and update the list of nodes
    * to add and remove per instance.
@@ -1031,6 +1062,7 @@ public class ZkAdapter {
    */
   public class ZkBackedLiveInstanceListProvider implements IZkChildListener {
     private List<String> _liveInstances = new ArrayList<>();
+    private Map<String, String> _instancePartitionMap = new HashMap<>();
     private String _path;
 
     /**

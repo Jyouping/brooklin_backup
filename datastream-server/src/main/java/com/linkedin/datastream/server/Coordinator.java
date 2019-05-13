@@ -5,12 +5,15 @@
  */
 package com.linkedin.datastream.server;
 
+import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
+import com.linkedin.datastream.server.assignment.StickyPartitionAssignmentStrategy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -32,6 +35,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.Validate;
 import org.apache.commons.lang.exception.ExceptionUtils;
@@ -204,6 +208,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
   private final Map<String, SerdeAdmin> _serdeAdmins = new HashMap<>();
   private final Map<String, Authorizer> _authorizers = new HashMap<>();
+  private final Map<DatastreamGroup, PartitionListener> _partitionListenerMap = new HashMap<>();
 
   /**
    * Constructor for coordinator
@@ -316,6 +321,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     for (DatastreamTask task : _assignedDatastreamTasks.values()) {
       ((EventProducer) task.getEventProducer()).shutdown();
     }
+
+    _partitionListenerMap.values().forEach(PartitionListener::shutdown);
 
     _adapter.disconnect();
     _log.info("Coordinator stopped");
@@ -667,6 +674,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           handleHeartbeat();
           break;
 
+        case LEADER_PARTITION_ASSIGNMENT:
+          performPartitionAssignment();
+          break;
+
         default:
           String errorMessage = String.format("Unknown event type %s.", event.getType());
           ErrorLogger.logAndThrowDatastreamRuntimeException(_log, errorMessage, null);
@@ -897,8 +908,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     Map<String, Set<DatastreamTask>> previousAssignmentByInstance = Collections.emptyMap();
     Map<String, List<DatastreamTask>> newAssignmentsByInstance = Collections.emptyMap();
 
+    //TODO, Datastream update: will it be a new dsg or not?
     try {
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
+
+      registerPartitionListener(datastreamGroups);
 
       _log.debug("handleLeaderDoAssignment: final datastreams for task assignment: {}", datastreamGroups);
 
@@ -943,6 +957,77 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         leaderDoAssignmentScheduled.set(false);
       }, _config.getRetryIntervalMs(), TimeUnit.MILLISECONDS);
     }
+  }
+
+  private void performPartitionAssignment() {
+    try {
+      Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+      List<DatastreamTask> datastreamTasks = new ArrayList<>();
+      assignmentByInstance.values().stream().forEach(s -> datastreamTasks.addAll(s));
+
+      PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
+      _partitionListenerMap.keySet().forEach(datastreamGroup -> {
+        List<DatastreamTask> assignedTasks = datastreamTasks.stream().filter(datastreamTask ->
+            datastreamGroup.belongsTo(datastreamTask)).collect(Collectors.toList());
+        List<String> subscribedPartitions = _partitionListenerMap.get(datastreamGroup).getSubscribedPartitions();
+        partitionAssignmentStrategy.assign(assignedTasks, subscribedPartitions);
+
+        //TODO: update the delta only
+        _adapter.updateAssignedTasks(assignmentByInstance);
+
+        _log.info("Partition assignment completed: datastreamGroup {}, assignment {} ", datastreamGroup, assignedTasks);
+      });
+
+
+    } catch (Exception ex) {
+      _log.info("Partition assigned failed, Exception: ", ex);
+
+    }
+  }
+
+  private void registerPartitionListener(List<DatastreamGroup> datastreamGroups) {
+    _log.info("Start Partition Listener");
+
+
+    //TODO verify metadata to start partition listener or not
+
+    //remove obsolete datastream
+    Set<DatastreamGroup> datastreamGroupSet = new HashSet<>(datastreamGroups);
+    Set<DatastreamGroup> obsoleteDatastream = _partitionListenerMap.keySet().stream()
+        .filter(dg -> !datastreamGroupSet.contains(dg)).collect(Collectors.toSet());
+
+    obsoleteDatastream.forEach(dg -> _partitionListenerMap.remove(dg).shutdown());
+
+    for (String connectorType : _connectors.keySet()) {
+      PartitionListenerFactory partitionListenerFactory = _connectors.get(connectorType).getPartitionListenerFactory();
+      if (partitionListenerFactory == null) {
+        continue;
+      }
+      List<DatastreamGroup> datastreamsPerConnectorType = datastreamGroups.stream()
+          .filter(x -> x.getConnectorName().equals(connectorType))
+          .collect(Collectors.toList());
+
+      partitionListenerFactory.createPartitionListener(_clusterName, _config.getConfigProperties());
+
+      datastreamsPerConnectorType.forEach(dg -> {
+        if (!_partitionListenerMap.containsKey(dg)) {
+          PartitionListener partitionListener = partitionListenerFactory.createPartitionListener(_clusterName, _config.getConfigProperties());
+          _partitionListenerMap.put(dg, partitionListener);
+          partitionListener.start(dg.getDatastreams().get(0), () -> {
+            _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
+          });
+        }
+      });
+
+      //DEBUG
+      _partitionListenerMap.values().forEach(partitionListener -> {
+        _log.info("{} started", partitionListener.getClass().getName());
+        _log.info("initial subscription: {}", ArrayUtils.toString(partitionListener.getSubscribedPartitions()));
+      });
+    }
+
+    _log.info("Partition Listener Started");
+
   }
 
   private Map<String, List<DatastreamTask>> performAssignment(List<String> liveInstances,
@@ -1028,11 +1113,13 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
    * @param customCheckpointing whether connector uses custom checkpointing. if the custom checkpointing is set to true
    *                            Coordinator will not perform checkpointing to ZooKeeper.
    * @param deduper the deduper used by connector
+   * @param partitionListenerFactory the partition listener used by connector
    * @param authorizerName name of the authorizer configured by connector
    *
    */
   public void addConnector(String connectorName, Connector connector, AssignmentStrategy strategy,
-      boolean customCheckpointing, DatastreamDeduper deduper, String authorizerName) {
+      boolean customCheckpointing, DatastreamDeduper deduper, PartitionListenerFactory partitionListenerFactory,
+      String authorizerName) {
     Validate.notNull(strategy, "strategy cannot be null");
     Validate.notEmpty(connectorName, "connectorName cannot be empty");
     Validate.notNull(connector, "Connector cannot be null");
@@ -1050,7 +1137,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     connectorMetrics.ifPresent(_metrics::addAll);
 
     ConnectorInfo connectorInfo =
-        new ConnectorInfo(connectorName, connector, strategy, customCheckpointing, _cpProvider, deduper, authorizerName);
+        new ConnectorInfo(connectorName, connector, strategy, customCheckpointing, _cpProvider, deduper,
+            partitionListenerFactory, authorizerName);
     _connectors.put(connectorName, connectorInfo);
 
     // Register common connector metrics
@@ -1357,6 +1445,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       while (!isInterrupted()) {
         try {
           CoordinatorEvent event = _eventQueue.take();
+          //Dedup the similar event in the eventQueue to avoid multiple trigger
+          while (!_eventQueue.isEmpty() && _eventQueue.peek().equals(event)) {
+            _eventQueue.take();
+          }
           if (event != null) {
             handleEvent(event);
           }
