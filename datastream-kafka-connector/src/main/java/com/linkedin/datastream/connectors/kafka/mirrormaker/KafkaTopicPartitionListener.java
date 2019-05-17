@@ -76,12 +76,11 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
 
   @Override
   public void shutdown() {
+    this.interrupt();
     if (_consumer != null) {
       _consumer.close();
     }
     _consumer = null;
-    this.interrupt();
-    this.shutdown();
   }
 
   @Override
@@ -131,8 +130,8 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
           _callback.run();
         }
         Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
-      } catch (Exception t) {
-        _log.error("Fetch thread for " + _datastream.getName() + " failed", t);
+      } catch (Throwable t) {
+        _log.error("detect error for thread " + _datastream.getName() + ", ex: ", t);
       }
     }
   }

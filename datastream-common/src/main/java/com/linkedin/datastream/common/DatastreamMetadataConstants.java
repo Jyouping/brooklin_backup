@@ -103,4 +103,9 @@ public class DatastreamMetadataConstants {
    * Key to set consumer group ID of the datastream.
    */
   public static final String GROUP_ID = "group.id";
+
+  /**
+   * Key to use Brooklin for partition assignment
+   */
+  public static final String USE_BROOKLIN_PARTITION_ASSIGNMENT = "system.performPartitionAssignment";
 }

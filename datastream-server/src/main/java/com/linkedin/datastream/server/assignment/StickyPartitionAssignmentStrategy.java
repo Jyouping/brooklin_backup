@@ -17,17 +17,25 @@ import org.slf4j.LoggerFactory;
 
 
 /**
- *
+ * Partition assignment strategy follow with a Sticky round robin assignment
+ * The original assignment suffers a minimal disruption unless there is a huge imbalance
+ * At the same time, any new assigned partition will be shuffled so that we can generate
+ * a slightly different assignment if there is a need to rebalance all
+ * It follows three steps
+ * 1) Removed the partitions that no longer need to be unassigned
+ * 2) move some partitions from heavily imbalanced task to toAssignPartitions
+ * 3) Assign toAssigned according to a round robin assignment
  */
 public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStrategy  {
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
+  private static final int MAX_ALLOW_INBALANCE_THRESHOLD = 2;
 
   @Override
   public void assign(List<DatastreamTask> assignedTask, List<String> partitions) {
     //TODO examine the change in assignedTask during leader partition assignment
 
     int maxPartitionPerTask = (int) Math.ceil((double) partitions.size() / (double) assignedTask.size());
-    // STEP1: drop the removed partition, and put the non-existing partition in assignedPartition
+    // STEP1: drop the to removed partition, and put the non-existing partition in assignedPartition
     List<String> toAssignPartitions = new ArrayList<>(partitions);
 
     assignedTask.stream().forEach(t -> {
@@ -37,8 +45,16 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
       toAssignPartitions.removeAll(t.getPartitionsV2());
     });
 
-    Collections.sort(toAssignPartitions);
-    // Step2: assign the remaining partitions
+    // Step 2: reassign heavily imbalanced partition
+    assignedTask.stream().forEach(task -> {
+      while (task.getPartitionsV2().size() > maxPartitionPerTask + MAX_ALLOW_INBALANCE_THRESHOLD) {
+        toAssignPartitions.add(task.getPartitionsV2().remove(task.getPartitionsV2().size() - 1));
+      }
+    });
+
+    // Step 3: assign the remaining partitions
+    Collections.shuffle(toAssignPartitions);
+
     int i = 0;
     while (toAssignPartitions.size() > 0) {
       List<String> taskOwnedPartitions = assignedTask.get(i % assignedTask.size()).getPartitionsV2();
@@ -48,7 +64,6 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
       ++i;
     }
 
-    //TODO: check if there is an imbalance and move the imbalance paritions around
     sanityChecks(assignedTask, partitions);
   }
 
@@ -65,7 +80,8 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
           + "size: {} is not equal to new partitions size: {}", total, partitions.size()));
     }
     if (toCheckPartitions.size() > 0) {
-      throw new DatastreamRuntimeException(String.format("Validation failed after assignment, unassigned partition: {}", toCheckPartitions));
+      throw new DatastreamRuntimeException(String.format("Validation failed after assignment, "
+          + "unassigned partition: {}", toCheckPartitions));
     }
   }
 }

@@ -1186,4 +1186,42 @@ public class ZkAdapter {
       // do nothing
     }
   }
+
+  /**
+   * ghaha
+   */
+  public class ZkBackedTaskContentProvider implements IZkChildListener, IZkDataListener {
+    private final String _path;
+
+    /**
+     * Constructor
+     * @param instanceName Instance for which the datastream task assignment is to be watched.
+     */
+    public ZkBackedTaskContentProvider(String cluster, String instanceName, String taskName) {
+      _path = KeyBuilder.instanceAssignment(cluster, instanceName, taskName);
+      LOG.info("ZkBackedTaskListProvider::Subscribing to the changes under the path " + _path);
+      _zkclient.subscribeChildChanges(_path, this);
+      _zkclient.subscribeDataChanges(_path, this);
+    }
+
+    @Override
+    public synchronized void handleChildChange(String parentPath, List<String> currentChildren) throws Exception {
+
+    }
+
+
+    @Override
+    public void handleDataChange(String dataPath, Object data) throws Exception {
+      LOG.info("ZkBackedTaskListProvider::Received Data change notification on the path {}, data {}.", dataPath, data);
+      if (_listener != null && data != null && !data.toString().isEmpty()) {
+        // only care about the data change when there is an update in the data node
+        _listener.onDatastreamUpdate();
+      }
+    }
+
+    @Override
+    public void handleDataDeleted(String dataPath) throws Exception {
+      // do nothing
+    }
+  }
 }

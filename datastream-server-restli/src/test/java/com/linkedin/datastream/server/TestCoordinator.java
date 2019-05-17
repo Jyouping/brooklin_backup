@@ -144,8 +144,6 @@ public class TestCoordinator {
    */
   @Test
   public void testConnectorStateSetAndGet() throws Exception {
-    Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress("web-proxy.ind.abc.com", 8080));
-    URLConnection connection = new URL(url).openConnection(proxy);
     String testCluster = "testConnectorStateSetAndGet";
     String testConnectorType = "testConnectorType";
 

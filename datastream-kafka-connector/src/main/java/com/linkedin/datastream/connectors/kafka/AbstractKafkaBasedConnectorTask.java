@@ -126,6 +126,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
 
   private volatile int _pollAttempts;
 
+
   protected AbstractKafkaBasedConnectorTask(KafkaBasedConnectorConfig config, DatastreamTask task, Logger logger,
       String metricsPrefix) {
     _logger = logger;
@@ -400,6 +401,10 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     }
   }
 
+  protected ConsumerRecords<?, ?> consumerPoll(long pollInterval) {
+    return _consumer.poll(pollInterval);
+  }
+
   /**
    * Poll the records from Kafka using the specified timeout (milliseconds). If poll() fails and if retryCount is
    * configured, this method will sleep for some duration and try polling again.
@@ -412,7 +417,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     try {
       long curPollTime = System.currentTimeMillis();
       _lastPolledTimeMillis = curPollTime;
-      records = _consumer.poll(pollInterval);
+      records = consumerPoll(pollInterval);
       long pollDurationMillis = System.currentTimeMillis() - curPollTime;
       if (pollDurationMillis > pollInterval + POLL_BUFFER_TIME_MILLIS) {
         // record poll time exceeding client poll timeout
@@ -611,7 +616,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     _logger.info("Seek completed to the offsets.");
   }
 
-  private void updateConsumerAssignment(Collection<TopicPartition> partitions) {
+  protected void updateConsumerAssignment(Collection<TopicPartition> partitions) {
     _consumerAssignment.clear();
     _consumerAssignment.addAll(partitions);
     _consumerMetrics.updateNumPartitions(_consumerAssignment.size());
@@ -936,5 +941,14 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     return _kafkaPositionTracker.map(
         tracker -> new DatastreamPositionResponse(ImmutableMap.of(_datastreamName, tracker.getOffsetPositions())))
         .orElse(null);
+  }
+
+
+  public void setDatastreamTask(DatastreamTask task) {
+    _datastreamTask = task;
+  }
+
+  public DatastreamTask getDatastreamTask() {
+    return _datastreamTask;
   }
 }

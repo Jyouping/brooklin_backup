@@ -10,16 +10,19 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.record.TimestampType;
@@ -105,6 +108,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   private long _maxInFlightMessagesThreshold;
   private long _minInFlightMessagesThreshold;
   private int _flowControlTriggerCount = 0;
+  private final boolean _useBrooklinForPartitionAssignment;
 
   private GroupIdConstructor _groupIdConstructor;
 
@@ -126,6 +130,11 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
     _isFlushlessModeEnabled = isFlushlessModeEnabled;
     _isIdentityMirroringEnabled = KafkaMirrorMakerDatastreamMetadata.isIdentityPartitioningEnabled(_datastream);
     _groupIdConstructor = groupIdConstructor;
+    _useBrooklinForPartitionAssignment = config.isUseBrooklinForPartitionAssignment();
+
+    if (_useBrooklinForPartitionAssignment) {
+      LOG.info("Use Brooklin for partition assignment");
+    }
 
     if (_isFlushlessModeEnabled) {
       _flushlessProducer = new FlushlessEventProducerHandler<>(_producer);
@@ -175,8 +184,25 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
   @Override
   protected void consumerSubscribe() {
-    LOG.info("About to subscribe to source: {}", _mirrorMakerSource.getTopicName());
-    _consumer.subscribe(Pattern.compile(_mirrorMakerSource.getTopicName()), this);
+    if (_useBrooklinForPartitionAssignment) {
+      Set<TopicPartition> topicPartition  = getAssignedTopicPartitionFromTask();
+      updateConsumerAssignment(topicPartition);
+      _consumer.assign(_consumerAssignment);
+    } else {
+      LOG.info("About to subscribe to source: {}", _mirrorMakerSource.getTopicName());
+      _consumer.subscribe(Pattern.compile(_mirrorMakerSource.getTopicName()), this);
+    }
+  }
+
+  private Set<TopicPartition> getAssignedTopicPartitionFromTask() {
+    LOG.info("Load assigned topic from task {}", _datastreamTask.getPartitionsV2());
+    return _datastreamTask.getPartitionsV2().stream().map(str -> {
+      int i = str.lastIndexOf("-");
+      int partition = Integer.valueOf(str.substring(i + 1));
+      String topic = str.substring(0, i);
+      return new TopicPartition(topic, partition);
+    }).collect(
+        Collectors.toSet());
   }
 
   @Override
@@ -275,8 +301,8 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
   @Override
   protected void maybeCommitOffsets(Consumer<?, ?> consumer, boolean hardCommit) {
+    boolean isTimeToCommit = System.currentTimeMillis() - _lastCommittedTime > _offsetCommitInterval;
     if (_isFlushlessModeEnabled) {
-      boolean isTimeToCommit = System.currentTimeMillis() - _lastCommittedTime > _offsetCommitInterval;
       if (hardCommit) { // hard commit (flush and commit checkpoints)
         LOG.info("Calling flush on the producer.");
         _datastreamTask.getEventProducer().flush();
@@ -290,8 +316,39 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
     } else {
       super.maybeCommitOffsetsInternal(consumer, hardCommit);
     }
+
+    //Periodically, update the assignment if necessary, we dont do it for hard commit as hard commit only happens
+    //when we are about to shut down the task
+    if (_useBrooklinForPartitionAssignment && isTimeToCommit && !hardCommit) {
+      Set<TopicPartition> newTopicPartition  = getAssignedTopicPartitionFromTask();
+      if (!newTopicPartition.equals(_consumerAssignment)) {
+        Set<TopicPartition> partitionToRevoked = new HashSet<>(_consumerAssignment);
+        partitionToRevoked.removeAll(newTopicPartition);
+        // Remove old position data
+        _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsRevoked(partitionToRevoked));
+        _topicManager.onPartitionsRevoked(partitionToRevoked);
+        //TODO: move onPartitions Assigned to a next cycle so that the revoking partition will be committed from all hosts
+        // Invoke partition assignment
+        this.onPartitionsAssigned(newTopicPartition);
+
+        _logger.info("Detected assignment changed, assigned with new partitions: {}", _consumerAssignment);
+        _consumer.assign(_consumerAssignment);
+      }
+    }
   }
 
+  @Override
+  protected ConsumerRecords<?, ?> consumerPoll(long pollInterval) {
+    if (_useBrooklinForPartitionAssignment) {
+      if (!_consumerAssignment.isEmpty()) {
+        return _consumer.poll(pollInterval);
+      } else {
+        return ConsumerRecords.EMPTY;
+      }
+    } else {
+      return _consumer.poll(pollInterval);
+    }
+  }
   /**
    * Get all metrics info for the connector whose name is {@code connectorName}
    */
@@ -375,4 +432,5 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   public TopicManager getTopicManager() {
     return _topicManager;
   }
+
 }

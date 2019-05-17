@@ -432,14 +432,20 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     // type of the changed assignment, and then call the corresponding callback of the connector instance
     List<String> assignment = _adapter.getInstanceAssignment(_adapter.getInstanceName());
 
+
     _log.info("START: Coordinator::handleAssignmentChange. Instance: " + _adapter.getInstanceName() + ", assignment: "
         + assignment + " isDatastreamUpdate: " + isDatastreamUpdate);
 
+    //TODO: any better approach to clear Only for partition update?
+    if (isDatastreamUpdate) {
+      _assignedDatastreamTasks.clear();
+    }
     // all datastream tasks for all connector types
     Map<String, List<DatastreamTask>> currentAssignment = new HashMap<>();
     assignment.forEach(ds -> {
       DatastreamTask task = getDatastreamTask(ds);
       if (task != null) {
+        _log.info("Task info: {}", task);
         String connectorType = task.getConnectorType();
         if (!currentAssignment.containsKey(connectorType)) {
           currentAssignment.put(connectorType, new ArrayList<>());
@@ -975,22 +981,18 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         //TODO: update the delta only
         _adapter.updateAssignedTasks(assignmentByInstance);
 
+        //Notify datastream update
+        _adapter.touchAllInstanceAssignments();
+
         _log.info("Partition assignment completed: datastreamGroup {}, assignment {} ", datastreamGroup, assignedTasks);
       });
 
-
     } catch (Exception ex) {
       _log.info("Partition assigned failed, Exception: ", ex);
-
     }
   }
 
   private void registerPartitionListener(List<DatastreamGroup> datastreamGroups) {
-    _log.info("Start Partition Listener");
-
-
-    //TODO verify metadata to start partition listener or not
-
     //remove obsolete datastream
     Set<DatastreamGroup> datastreamGroupSet = new HashSet<>(datastreamGroups);
     Set<DatastreamGroup> obsoleteDatastream = _partitionListenerMap.keySet().stream()
@@ -1003,6 +1005,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       if (partitionListenerFactory == null) {
         continue;
       }
+
+      _log.info("Start Partition Listener {}", partitionListenerFactory);
+
       List<DatastreamGroup> datastreamsPerConnectorType = datastreamGroups.stream()
           .filter(x -> x.getConnectorName().equals(connectorType))
           .collect(Collectors.toList());
@@ -1019,15 +1024,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         }
       });
 
-      //DEBUG
       _partitionListenerMap.values().forEach(partitionListener -> {
         _log.info("{} started", partitionListener.getClass().getName());
         _log.info("initial subscription: {}", ArrayUtils.toString(partitionListener.getSubscribedPartitions()));
       });
     }
-
-    _log.info("Partition Listener Started");
-
   }
 
   private Map<String, List<DatastreamTask>> performAssignment(List<String> liveInstances,
