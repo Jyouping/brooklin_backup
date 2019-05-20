@@ -89,6 +89,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
    */
   @TestOnly
   public DatastreamTaskImpl() {
+    _id = UUID.randomUUID().toString();
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>();
   }
@@ -367,7 +368,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public int hashCode() {
-    return Objects.hash(_connectorType, _id, _taskPrefix, _partitions);
+    return Objects.hash(_connectorType, _id, _taskPrefix, _partitions, _partitionsV2);
   }
 
   @Override

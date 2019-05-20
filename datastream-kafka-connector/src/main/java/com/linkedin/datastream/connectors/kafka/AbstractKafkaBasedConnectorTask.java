@@ -621,7 +621,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     _consumerAssignment.addAll(partitions);
     _consumerMetrics.updateNumPartitions(_consumerAssignment.size());
     _consumerMetrics.updateNumTopics(_consumerAssignment.stream().map(tp -> tp.topic()).distinct().count());
-    _logger.info("Current assignment is {}", _consumerAssignment);
+    _logger.info("{} Current assignment is {}", _datastreamTask.getDatastreamTaskName(), _consumerAssignment);
   }
 
   @Override
@@ -637,7 +637,9 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
       }
     }
 
-    updateConsumerAssignment(_consumer.assignment());
+    Set<TopicPartition> newAssignment = new HashSet<>(_consumerAssignment);
+    newAssignment.removeAll(topicPartitions);
+    updateConsumerAssignment(newAssignment);
 
     // Remove old position data
     _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsRevoked(_consumerAssignment));
@@ -649,7 +651,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
   @Override
   public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
     _consumerMetrics.updateRebalanceRate(1);
-    _logger.info("Partition ownership assigned for {}.", partitions);
+    _logger.info("{} Partition ownership assigned for {}.", _datastreamTask.getDatastreamTaskName(), partitions);
 
     updateConsumerAssignment(partitions);
     _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsAssigned(partitions));

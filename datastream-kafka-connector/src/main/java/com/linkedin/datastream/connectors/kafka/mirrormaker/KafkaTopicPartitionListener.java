@@ -46,6 +46,7 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
   private Runnable _callback;
   private KafkaConnectionString _sourceConnection;
   private Pattern _topicPattern;
+  private boolean _shutdown;
 
 
   /**
@@ -58,6 +59,7 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
     _groupIdConstructor = groupIdConstructor;
     _sourceConnection = null;
     _topicPattern = null;
+    _shutdown = false;
   }
 
   //TODO: how do you perform an update to a datastream
@@ -65,10 +67,6 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
   public void start(Datastream datastream, Runnable callback) {
     _datastream = datastream;
     _sourceConnection = KafkaConnectionString.valueOf(datastream.getSource().getConnectionString());
-    String bootstrapValue = String.join(KafkaConnectionString.BROKER_LIST_DELIMITER,
-        _sourceConnection.getBrokers().stream().map(KafkaBrokerAddress::toString).collect(Collectors.toList()));
-    _consumer = createConsumer(_consumerProperties, bootstrapValue,
-        _groupIdConstructor.constructGroupId(_datastream) + DEST_CONSUMER_GROUP_ID_SUFFIX);
     _topicPattern = Pattern.compile(_sourceConnection.getTopicName());
     _callback = callback;
     this.start();
@@ -76,11 +74,8 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
 
   @Override
   public void shutdown() {
+    _shutdown = true;
     this.interrupt();
-    if (_consumer != null) {
-      _consumer.close();
-    }
-    _consumer = null;
   }
 
   @Override
@@ -115,8 +110,13 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
    */
   //TODO fault recovery
   public void run() {
+    String bootstrapValue = String.join(KafkaConnectionString.BROKER_LIST_DELIMITER,
+        _sourceConnection.getBrokers().stream().map(KafkaBrokerAddress::toString).collect(Collectors.toList()));
+    _consumer = createConsumer(_consumerProperties, bootstrapValue,
+        _groupIdConstructor.constructGroupId(_datastream) + DEST_CONSUMER_GROUP_ID_SUFFIX);
+
     _log.info("Fetch thread for {} started", _datastream.getName());
-    while (!isInterrupted()) {
+    while (!isInterrupted() && !_shutdown) {
       try {
         // If partition is changed
         List<String> newPartitionInfo = getPartitionsInfo();
@@ -134,5 +134,10 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
         _log.error("detect error for thread " + _datastream.getName() + ", ex: ", t);
       }
     }
+    if (_consumer != null) {
+      _consumer.close();
+    }
+    _consumer = null;
+    _log.info("Fetch thread for {} stopped", _datastream.getName());
   }
 }

@@ -111,6 +111,12 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   private final boolean _useBrooklinForPartitionAssignment;
 
   private GroupIdConstructor _groupIdConstructor;
+  private long _lastPartitionRevokedTime = 0;
+  protected static final long DEFAULT_MIN_WAIT_TIME_BEFORE_REASSIGNMENT_MS = 10000;
+  private Set<TopicPartition> _cachedTaskAssignedPartitions = Collections.synchronizedSet(new HashSet<>());
+
+
+
 
   /**
    * Constructor for KafkaMirrorMakerConnectorTask
@@ -195,14 +201,19 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   }
 
   private Set<TopicPartition> getAssignedTopicPartitionFromTask() {
-    LOG.info("Load assigned topic from task {}", _datastreamTask.getPartitionsV2());
-    return _datastreamTask.getPartitionsV2().stream().map(str -> {
-      int i = str.lastIndexOf("-");
-      int partition = Integer.valueOf(str.substring(i + 1));
-      String topic = str.substring(0, i);
-      return new TopicPartition(topic, partition);
-    }).collect(
-        Collectors.toSet());
+    if (!_cachedTaskAssignedPartitions.isEmpty()) {
+      return _cachedTaskAssignedPartitions;
+    } else {
+      _cachedTaskAssignedPartitions.addAll(
+          _datastreamTask.getPartitionsV2().stream().map(str -> {
+            int i = str.lastIndexOf("-");
+            int partition = Integer.valueOf(str.substring(i + 1));
+            String topic = str.substring(0, i);
+            return new TopicPartition(topic, partition);
+          }).collect(Collectors.toSet())
+      );
+      return _cachedTaskAssignedPartitions;
+    }
   }
 
   @Override
@@ -319,20 +330,29 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
     //Periodically, update the assignment if necessary, we dont do it for hard commit as hard commit only happens
     //when we are about to shut down the task
-    if (_useBrooklinForPartitionAssignment && isTimeToCommit && !hardCommit) {
+    if (_useBrooklinForPartitionAssignment && !hardCommit) {
+      //TODO avoid hard commit recurrsion? and better cache
       Set<TopicPartition> newTopicPartition  = getAssignedTopicPartitionFromTask();
       if (!newTopicPartition.equals(_consumerAssignment)) {
-        Set<TopicPartition> partitionToRevoked = new HashSet<>(_consumerAssignment);
-        partitionToRevoked.removeAll(newTopicPartition);
-        // Remove old position data
-        _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsRevoked(partitionToRevoked));
-        _topicManager.onPartitionsRevoked(partitionToRevoked);
-        //TODO: move onPartitions Assigned to a next cycle so that the revoking partition will be committed from all hosts
-        // Invoke partition assignment
-        this.onPartitionsAssigned(newTopicPartition);
+        //_logger.info("Try to assignment changed, assigned with new partitions: {}", newTopicPartition);
+        Set<TopicPartition> partitionToRevoke = new HashSet<>(_consumerAssignment);
+        // TODO: review the logic here, whats the input for partitions to be revoked
+        partitionToRevoke.removeAll(newTopicPartition);
+        if (!partitionToRevoke.isEmpty()) {
+          _logger.info("Partition to revoke", partitionToRevoke);
 
-        _logger.info("Detected assignment changed, assigned with new partitions: {}", _consumerAssignment);
-        _consumer.assign(_consumerAssignment);
+          // Remove old position data
+          this.onPartitionsRevoked(partitionToRevoke);
+          _lastPartitionRevokedTime = System.currentTimeMillis();
+          _consumer.assign(_consumerAssignment);
+        }
+
+        //Delay partition assignment for a period of time so that it get commited from other hosts
+        if (System.currentTimeMillis() > _lastPartitionRevokedTime + DEFAULT_MIN_WAIT_TIME_BEFORE_REASSIGNMENT_MS) {
+          this.onPartitionsAssigned(newTopicPartition);
+          _consumer.assign(_consumerAssignment);
+          _logger.info("Brooklin controlled assignment completed, task {}", _datastreamTask.getDatastreamTaskName());
+        }
       }
     }
   }
@@ -431,6 +451,14 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   @VisibleForTesting
   public TopicManager getTopicManager() {
     return _topicManager;
+  }
+
+  @Override
+  public synchronized void setDatastreamTask(DatastreamTask task) {
+    _logger.info("DatastreamTask {} in set to the connector", task.getDatastreamTaskName());
+    _cachedTaskAssignedPartitions.clear();
+    _lastPartitionRevokedTime = System.currentTimeMillis();
+    _datastreamTask = task;
   }
 
 }
