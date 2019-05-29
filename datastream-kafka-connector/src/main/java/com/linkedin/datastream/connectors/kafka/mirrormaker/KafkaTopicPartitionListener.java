@@ -13,9 +13,11 @@ import com.linkedin.datastream.connectors.kafka.KafkaConsumerFactory;
 import com.linkedin.datastream.server.PartitionListener;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.apache.commons.collections.ListUtils;
@@ -43,7 +45,7 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
   private Datastream _datastream;
   private GroupIdConstructor _groupIdConstructor;
   private List<String> _subscribedPartitions = new ArrayList<>();
-  private Runnable _callback;
+  private java.util.function.Consumer<List<String>> _callback;
   private KafkaConnectionString _sourceConnection;
   private Pattern _topicPattern;
   private boolean _shutdown;
@@ -64,7 +66,7 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
 
   //TODO: how do you perform an update to a datastream
   @Override
-  public void start(Datastream datastream, Runnable callback) {
+  public void start(Datastream datastream, java.util.function.Consumer<List<String>>callback) {
     _datastream = datastream;
     _sourceConnection = KafkaConnectionString.valueOf(datastream.getSource().getConnectionString());
     _topicPattern = Pattern.compile(_sourceConnection.getTopicName());
@@ -120,14 +122,16 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
       try {
         // If partition is changed
         List<String> newPartitionInfo = getPartitionsInfo();
-        _log.debug("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
+        _log.info("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
             , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
 
         if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
           _log.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
               , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
+          Set<String> addedPartitions = new HashSet<>(newPartitionInfo);
+          addedPartitions.removeAll(_subscribedPartitions);
           _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
-          _callback.run();
+          _callback.accept(Collections.synchronizedList(new ArrayList<String>(addedPartitions)));
         }
         Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
       } catch (Throwable t) {

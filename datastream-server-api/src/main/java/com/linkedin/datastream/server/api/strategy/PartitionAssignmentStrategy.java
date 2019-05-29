@@ -17,5 +17,5 @@ public interface PartitionAssignmentStrategy {
   /**
    * doc
    */
-  void assign(List<DatastreamTask> assignedTask, List<String> partitions);
+  void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> subscribedPartitions);
 }

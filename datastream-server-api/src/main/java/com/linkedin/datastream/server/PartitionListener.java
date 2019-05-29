@@ -7,6 +7,7 @@ package com.linkedin.datastream.server;
 
 import java.util.List;
 import com.linkedin.datastream.common.Datastream;
+import java.util.Set;
 
 
 /**
@@ -17,7 +18,7 @@ public interface PartitionListener {
   /**
    * doc
    */
-  void start(Datastream datastream, Runnable callback);
+  void start(Datastream datastream, java.util.function.Consumer<List<String>> callback);
 
   /**
    * doc

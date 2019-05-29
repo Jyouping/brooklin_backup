@@ -30,25 +30,41 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
   private static final int MAX_ALLOW_INBALANCE_THRESHOLD = 2;
 
+  //TODO: adopt generations for datastreamTask for immutability
+
   @Override
-  public void assign(List<DatastreamTask> assignedTask, List<String> partitions) {
-    //TODO examine the change in assignedTask during leader partition assignment
+  public void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> subscribedPartitions) {
+    // Assignment logic 1) filter toReassignPartition from subscribedPartitions
+    // 2) assign toReassignPartition
 
-    int maxPartitionPerTask = (int) Math.ceil((double) partitions.size() / (double) assignedTask.size());
-    // STEP1: drop the to removed partition, and put the non-existing partition in assignedPartition
-    List<String> toAssignPartitions = new ArrayList<>(partitions);
+    LOG.info("assignment info, task: {}, partitions: {}, subscribedOne: {}",
+        assignedTask, pendingPartition, subscribedPartitions);
+    List<String> toRevokedPartitions = new ArrayList<>();
 
+    //Step 1: revoke the partitions that no longer can be assigned
     assignedTask.stream().forEach(t -> {
-      List<String> toRemovedPartition = t.getPartitionsV2().stream().filter(p -> !partitions.contains(p)).collect(
+      List<String> toRemovedPartition = t.getPartitionsV2().stream().filter(p -> !subscribedPartitions.contains(p)).collect(
           Collectors.toList());
       t.getPartitionsV2().removeAll(toRemovedPartition);
-      toAssignPartitions.removeAll(t.getPartitionsV2());
+      toRevokedPartitions.addAll(toRemovedPartition);
     });
 
-    // Step 2: reassign heavily imbalanced partition
+
+    // Step2: drop the partitions that which is no longer subscribed from to Assigned partitions
+    List<String> toAssignPartitions = new ArrayList<>(pendingPartition.stream()
+        .filter(p -> subscribedPartitions.contains(p)).collect(Collectors.toList()));
+
+
+    // Step 2: invoke heavily imbalanced partition
+
+    int assignedPartitionSize = assignedTask.stream().map(t -> t.getPartitionsV2().size())
+        .mapToInt(Integer::intValue).sum();
+
+    int maxPartitionPerTask = (int) Math.ceil((double) (assignedPartitionSize + toAssignPartitions.size()) / (double) assignedTask.size());
+
     assignedTask.stream().forEach(task -> {
       while (task.getPartitionsV2().size() > maxPartitionPerTask + MAX_ALLOW_INBALANCE_THRESHOLD) {
-        toAssignPartitions.add(task.getPartitionsV2().remove(task.getPartitionsV2().size() - 1));
+        toRevokedPartitions.add(task.getPartitionsV2().remove(task.getPartitionsV2().size() - 1));
       }
     });
 
@@ -64,7 +80,11 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
       ++i;
     }
 
-    sanityChecks(assignedTask, partitions);
+    if (toRevokedPartitions.size() > 0) {
+      LOG.info("To revoke partitions {}", toRevokedPartitions);
+    }
+    //TODO fix
+    //sanityChecks(assignedTask, subscribedPartitions);
   }
 
   private void sanityChecks(List<DatastreamTask> assignedTask, List<String> partitions) {

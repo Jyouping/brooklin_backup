@@ -391,4 +391,10 @@ public class DatastreamTaskImpl implements DatastreamTask {
     LOG.debug("Update checkpoint called for partition {} and checkpoint {}", partition, checkpoint);
     _checkpoints.put(partition, checkpoint);
   }
+
+  @Override
+  public void revokePartitions(List<String> partitions) {
+    _partitionsV2.removeAll(partitions);
+    _zkAdapter.addPendingPartitions(_taskPrefix, partitions);
+  }
 }

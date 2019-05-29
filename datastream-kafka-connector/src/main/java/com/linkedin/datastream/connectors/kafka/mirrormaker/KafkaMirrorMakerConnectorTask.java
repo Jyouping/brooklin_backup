@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.connectors.kafka.mirrormaker;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -111,7 +112,6 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   private final boolean _useBrooklinForPartitionAssignment;
 
   private GroupIdConstructor _groupIdConstructor;
-  private long _lastPartitionRevokedTime = 0;
   protected static final long DEFAULT_MIN_WAIT_TIME_BEFORE_REASSIGNMENT_MS = 10000;
   private Set<TopicPartition> _cachedTaskAssignedPartitions = Collections.synchronizedSet(new HashSet<>());
 
@@ -287,9 +287,20 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   }
 
   @Override
+  public void run() {
+    if (_useBrooklinForPartitionAssignment) {
+      _datastreamTask.acquire(Duration.ofMillis(1));
+    }
+    super.run();
+  }
+
+  @Override
   public void stop() {
     super.stop();
     _topicManager.stop();
+    if (_useBrooklinForPartitionAssignment) {
+      _datastreamTask.release();
+    }
   }
 
   @Override
@@ -343,16 +354,14 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
           // Remove old position data
           this.onPartitionsRevoked(partitionToRevoke);
-          _lastPartitionRevokedTime = System.currentTimeMillis();
           _consumer.assign(_consumerAssignment);
+          _datastreamTask.revokePartitions(partitionToRevoke.stream()
+              .map(TopicPartition::toString).collect(Collectors.toList()));
         }
 
-        //Delay partition assignment for a period of time so that it get commited from other hosts
-        if (System.currentTimeMillis() > _lastPartitionRevokedTime + DEFAULT_MIN_WAIT_TIME_BEFORE_REASSIGNMENT_MS) {
           this.onPartitionsAssigned(newTopicPartition);
           _consumer.assign(_consumerAssignment);
           _logger.info("Brooklin controlled assignment completed, task {}", _datastreamTask.getDatastreamTaskName());
-        }
       }
     }
   }
@@ -457,7 +466,6 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   public synchronized void setDatastreamTask(DatastreamTask task) {
     _logger.info("DatastreamTask {} in set to the connector", task.getDatastreamTaskName());
     _cachedTaskAssignedPartitions.clear();
-    _lastPartitionRevokedTime = System.currentTimeMillis();
     _datastreamTask = task;
   }
 

@@ -208,7 +208,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
   private final Map<String, SerdeAdmin> _serdeAdmins = new HashMap<>();
   private final Map<String, Authorizer> _authorizers = new HashMap<>();
-  private final Map<DatastreamGroup, PartitionListener> _partitionListenerMap = new HashMap<>();
+  private final Map<String, PartitionListener> _partitionListenerMap = new HashMap<>();
+  private final Map<String, RevokedPartitionWatcher> _revokedPartitionWatcherMap = new HashMap<>();
+
 
   /**
    * Constructor for coordinator
@@ -323,6 +325,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     }
 
     _partitionListenerMap.values().forEach(PartitionListener::shutdown);
+    _revokedPartitionWatcherMap.values().forEach(RevokedPartitionWatcher::interrupt);
 
     _adapter.disconnect();
     _log.info("Coordinator stopped");
@@ -968,15 +971,19 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   private void performPartitionAssignment() {
     try {
       Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+
       List<DatastreamTask> datastreamTasks = new ArrayList<>();
       assignmentByInstance.values().stream().forEach(s -> datastreamTasks.addAll(s));
 
       PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
-      _partitionListenerMap.keySet().forEach(datastreamGroup -> {
+      _partitionListenerMap.keySet().forEach(taskPrefix -> {
         List<DatastreamTask> assignedTasks = datastreamTasks.stream().filter(datastreamTask ->
-            datastreamGroup.belongsTo(datastreamTask)).collect(Collectors.toList());
-        List<String> subscribedPartitions = _partitionListenerMap.get(datastreamGroup).getSubscribedPartitions();
-        partitionAssignmentStrategy.assign(assignedTasks, subscribedPartitions);
+            taskPrefix.equals(datastreamTask.getTaskPrefix())).collect(Collectors.toList());
+        List<String> subscribedPartitions = _partitionListenerMap.get(taskPrefix).getSubscribedPartitions();
+
+        List<String> pendingPartitions = _adapter.getToAssignPartitions(taskPrefix);
+
+        partitionAssignmentStrategy.assign(assignedTasks, pendingPartitions, subscribedPartitions);
 
         //TODO: update the delta only
         _adapter.updateAssignedTasks(assignmentByInstance);
@@ -984,7 +991,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         //Notify datastream update
         _adapter.touchAllInstanceAssignments();
 
-        _log.info("Partition assignment completed: datastreamGroup {}, assignment {} ", datastreamGroup, assignedTasks);
+        _log.info("Partition assignment completed: datastreamGroup, taskPrefix {}, assignment {} ", taskPrefix, assignedTasks);
       });
 
     } catch (Exception ex) {
@@ -994,11 +1001,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
   private void registerPartitionListener(List<DatastreamGroup> datastreamGroups) {
     //remove obsolete datastream
-    Set<DatastreamGroup> datastreamGroupSet = new HashSet<>(datastreamGroups);
-    Set<DatastreamGroup> obsoleteDatastream = _partitionListenerMap.keySet().stream()
-        .filter(dg -> !datastreamGroupSet.contains(dg)).collect(Collectors.toSet());
+    Set<String> datastreamGroupNames = datastreamGroups.stream().map(DatastreamGroup::getTaskPrefix).collect(Collectors.toSet());
+    Set<String> obsoleteDatastream = _partitionListenerMap.keySet().stream()
+        .filter(name -> !datastreamGroupNames.contains(name)).collect(Collectors.toSet());
 
     obsoleteDatastream.forEach(dg -> _partitionListenerMap.remove(dg).shutdown());
+    obsoleteDatastream.forEach(dg -> _revokedPartitionWatcherMap.remove(dg).interrupt());
 
     for (String connectorType : _connectors.keySet()) {
       PartitionListenerFactory partitionListenerFactory = _connectors.get(connectorType).getPartitionListenerFactory();
@@ -1015,12 +1023,17 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       partitionListenerFactory.createPartitionListener(_clusterName, _config.getConfigProperties());
 
       datastreamsPerConnectorType.forEach(dg -> {
-        if (!_partitionListenerMap.containsKey(dg)) {
+        if (!_partitionListenerMap.containsKey(dg.getTaskPrefix())) {
           PartitionListener partitionListener = partitionListenerFactory.createPartitionListener(_clusterName, _config.getConfigProperties());
-          _partitionListenerMap.put(dg, partitionListener);
-          partitionListener.start(dg.getDatastreams().get(0), () -> {
+          _partitionListenerMap.put(dg.getTaskPrefix(), partitionListener);
+          partitionListener.start(dg.getDatastreams().get(0), newPartitions -> {
+            _adapter.addPendingPartitions(dg.getTaskPrefix(), newPartitions);
             _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
           });
+        }
+        if (!_revokedPartitionWatcherMap.containsKey(dg.getTaskPrefix())) {
+          _revokedPartitionWatcherMap.put(dg.getTaskPrefix(), new RevokedPartitionWatcher(dg));
+          _revokedPartitionWatcherMap.get(dg.getTaskPrefix()).start();
         }
       });
 
@@ -1461,6 +1474,33 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         }
       }
       _log.info("END CoordinatorEventProcessor");
+    }
+  }
+
+  private class RevokedPartitionWatcher extends Thread {
+    private DatastreamGroup _datastreamGroup;
+    public RevokedPartitionWatcher(DatastreamGroup dg) {
+      _datastreamGroup = dg;
+    }
+    @Override
+    public void run() {
+      _log.info("START RevokePartitionWatcher thread");
+      while (!isInterrupted()) {
+        try {
+          List<String> pendingPartitions = _adapter.peekPendingPartitions(_datastreamGroup.getTaskPrefix());
+          if (!pendingPartitions.isEmpty()) {
+            _log.info("Detect pending partition: {}", pendingPartitions);
+            _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
+          }
+          sleep(30000);
+        } catch (InterruptedException e) {
+          _log.warn("RevokePartitionWatcher interrupted", e);
+          interrupt();
+        } catch (Exception t) {
+          _log.error("RevokePartitionWatcher failed", t);
+        }
+      }
+      _log.info("END RevokePartitionWatcher");
     }
   }
 }

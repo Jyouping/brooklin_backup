@@ -1188,40 +1188,48 @@ public class ZkAdapter {
   }
 
   /**
-   * ghaha
+   * This is a blocking queue implementations
    */
-  public class ZkBackedTaskContentProvider implements IZkChildListener, IZkDataListener {
-    private final String _path;
+  public void addPendingPartitions(String taskPrefix, List<String> partitions) {
+    _zkclient.ensurePath(KeyBuilder.instance(_cluster, _instanceName));
+    _zkclient.ensurePath(KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix));
 
-    /**
-     * Constructor
-     * @param instanceName Instance for which the datastream task assignment is to be watched.
-     */
-    public ZkBackedTaskContentProvider(String cluster, String instanceName, String taskName) {
-      _path = KeyBuilder.instanceAssignment(cluster, instanceName, taskName);
-      LOG.info("ZkBackedTaskListProvider::Subscribing to the changes under the path " + _path);
-      _zkclient.subscribeChildChanges(_path, this);
-      _zkclient.subscribeDataChanges(_path, this);
-    }
-
-    @Override
-    public synchronized void handleChildChange(String parentPath, List<String> currentChildren) throws Exception {
-
-    }
-
-
-    @Override
-    public void handleDataChange(String dataPath, Object data) throws Exception {
-      LOG.info("ZkBackedTaskListProvider::Received Data change notification on the path {}, data {}.", dataPath, data);
-      if (_listener != null && data != null && !data.toString().isEmpty()) {
-        // only care about the data change when there is an update in the data node
-        _listener.onDatastreamUpdate();
-      }
-    }
-
-    @Override
-    public void handleDataDeleted(String dataPath) throws Exception {
-      // do nothing
-    }
+    partitions.stream().forEach(p -> {
+          String path = KeyBuilder.pendingPartitions(_cluster, taskPrefix, p);
+          if (!_zkclient.exists(path)) {
+            _zkclient.createEphemeral(path, _instanceName);
+          }
+        }
+    );
   }
+
+  public synchronized List<String> getToAssignPartitions(String taskPrefix) {
+    //apply lock
+    String path = KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix);
+    if (_zkclient.exists(path)) {
+      List<String> toAssignPartitions = new ArrayList<>();
+      _zkclient.getChildren(path).stream().forEach(p -> {
+        toAssignPartitions.add(p);
+        _zkclient.delete(KeyBuilder.pendingPartitions(_cluster, taskPrefix, p));
+      });
+      LOG.info("retrieve pending partitions from zk {}", toAssignPartitions);
+      return toAssignPartitions;
+    }
+    return Collections.emptyList();
+  }
+
+  /*
+   *
+   */
+  public List<String> peekPendingPartitions(String taskPrefix) {
+    //apply lock
+    String path = KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix);
+    if (_zkclient.exists(path)) {
+      List<String> partitions = _zkclient.getChildren(path);
+      LOG.info("peek pending partitions from zk {}", partitions);
+      return partitions;
+    }
+    return Collections.emptyList();
+  }
+
 }
