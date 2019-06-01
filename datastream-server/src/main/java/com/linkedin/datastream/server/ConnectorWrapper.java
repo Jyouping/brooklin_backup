@@ -38,17 +38,20 @@ public class ConnectorWrapper {
   private AtomicLong _numDatastreams;
   private AtomicLong _numDatastreamTasks;
 
+  private PartitionListener _partitionListener;
+
   /**
    * Create ConnectorWrapper that wraps the provided Connector
    * @param connectorType Name of the connector
    * @param connector Connector for which wrapper should be created.
    */
-  public ConnectorWrapper(String connectorType, Connector connector) {
+  public ConnectorWrapper(String connectorType, Connector connector, PartitionListener partitionListener) {
     _log = LoggerFactory.getLogger(String.format("%s:%s", ConnectorWrapper.class.getName(), connectorType));
     _connectorType = connectorType;
     _connector = connector;
     _numDatastreams = new AtomicLong(0);
     _numDatastreamTasks = new AtomicLong(0);
+    _partitionListener = partitionListener;
   }
 
   /**
@@ -116,6 +119,9 @@ public class ConnectorWrapper {
 
     try {
       _connector.stop();
+      if (_partitionListener != null) {
+        _partitionListener.shutdown();
+      }
     } catch (Exception ex) {
       logErrorAndException("stop", ex);
       throw ex;
@@ -247,5 +253,10 @@ public class ConnectorWrapper {
     }
 
     logApiEnd("postDatastreamInitialize");
+  }
+
+
+  public PartitionListener getPartitionListener() {
+    return _partitionListener;
   }
 }

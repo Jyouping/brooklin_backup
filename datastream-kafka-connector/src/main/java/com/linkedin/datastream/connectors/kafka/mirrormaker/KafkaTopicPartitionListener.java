@@ -5,19 +5,16 @@
  */
 package com.linkedin.datastream.connectors.kafka.mirrormaker;
 
-import com.linkedin.datastream.common.Datastream;
-import com.linkedin.datastream.connectors.kafka.GroupIdConstructor;
-import com.linkedin.datastream.connectors.kafka.KafkaBrokerAddress;
-import com.linkedin.datastream.connectors.kafka.KafkaConnectionString;
-import com.linkedin.datastream.connectors.kafka.KafkaConsumerFactory;
-import com.linkedin.datastream.server.PartitionListener;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.apache.commons.collections.ListUtils;
@@ -29,10 +26,18 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.linkedin.datastream.common.Datastream;
+import com.linkedin.datastream.connectors.kafka.GroupIdConstructor;
+import com.linkedin.datastream.connectors.kafka.KafkaBrokerAddress;
+import com.linkedin.datastream.connectors.kafka.KafkaConnectionString;
+import com.linkedin.datastream.connectors.kafka.KafkaConsumerFactory;
+import com.linkedin.datastream.server.DatastreamGroup;
+import com.linkedin.datastream.server.PartitionListener;
+
 /**
  * doc
  */
-public class KafkaTopicPartitionListener extends Thread implements PartitionListener {
+public class KafkaTopicPartitionListener implements PartitionListener {
   private final Logger _log = LoggerFactory.getLogger(KafkaTopicPartitionListener.class.getName());
 
   private static final String DEST_CONSUMER_GROUP_ID_SUFFIX = "-topic-partition-listener";
@@ -41,15 +46,13 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
   private final KafkaConsumerFactory<?, ?> _kafkaConsumerFactory;
 
   private Properties _consumerProperties;
-  private Consumer<?, ?> _consumer;
-  private Datastream _datastream;
   private GroupIdConstructor _groupIdConstructor;
-  private List<String> _subscribedPartitions = new ArrayList<>();
-  private java.util.function.Consumer<List<String>> _callback;
-  private KafkaConnectionString _sourceConnection;
-  private Pattern _topicPattern;
   private boolean _shutdown;
 
+  private Map<String, PartitionDiscoveryThread> _partitionDiscoveryThreadMap = new HashMap<>();
+  private Thread _partitionReassignmentThread;
+  private java.util.function.BiConsumer<String, List<String>>_discoveryCallback;
+  private java.util.function.Consumer<List<String>> _reassignmentCallback;
 
   /**
    * doc
@@ -59,40 +62,62 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
     _consumerProperties = consumerProperties;
     _kafkaConsumerFactory = consumerFactory;
     _groupIdConstructor = groupIdConstructor;
-    _sourceConnection = null;
-    _topicPattern = null;
     _shutdown = false;
   }
 
   //TODO: how do you perform an update to a datastream
   @Override
-  public void start(Datastream datastream, java.util.function.Consumer<List<String>>callback) {
-    _datastream = datastream;
-    _sourceConnection = KafkaConnectionString.valueOf(datastream.getSource().getConnectionString());
-    _topicPattern = Pattern.compile(_sourceConnection.getTopicName());
-    _callback = callback;
-    this.start();
+  public void start(BiConsumer<String, List<String>> discoveryCallback,
+      java.util.function.Consumer<List<String>> reassignmentCallback) {
+    _discoveryCallback = discoveryCallback;
+    _reassignmentCallback = reassignmentCallback;
+    _partitionReassignmentThread = new PartitionReassignmentThread();
+    _partitionReassignmentThread.start();
   }
 
   @Override
   public void shutdown() {
     _shutdown = true;
-    this.interrupt();
+    _partitionDiscoveryThreadMap.values().forEach(Thread::interrupt);
+    if (_partitionReassignmentThread != null) {
+      _partitionReassignmentThread.interrupt();
+    }
   }
 
   @Override
-  public List<String> getSubscribedPartitions() {
-    return _subscribedPartitions;
+  public List<String> getSubscribedPartitions(String datastreamGroupName) {
+    return _partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions;
   }
 
-  private List<String> getPartitionsInfo() {
-    Map<String, List<PartitionInfo>> sourceTopics = _consumer.listTopics();
-    List<TopicPartition> topicPartitions = sourceTopics.keySet().stream()
-        .filter(t1 -> _topicPattern.matcher(t1).matches()).flatMap(t2 ->
-            sourceTopics.get(t2).stream().map(partitionInfo ->
-            new TopicPartition(partitionInfo.topic(), partitionInfo.partition()))).collect(Collectors.toList());
+  @Override
+  public void deregister(String datastreamGroupName) {
+    _log.info("attempted to deregister datastream group {}", datastreamGroupName);
 
-    return topicPartitions.stream().map(TopicPartition::toString).sorted().collect(Collectors.toList());
+    Optional.ofNullable(_partitionDiscoveryThreadMap.remove(datastreamGroupName)).ifPresent(Thread::interrupt);
+  }
+
+  public List<String> getRegisteredDatastreamGroups() {
+    return new ArrayList<>(_partitionDiscoveryThreadMap.keySet());
+  }
+
+
+  @Override
+  public void register(DatastreamGroup datastreamGroup) {
+    //TODO check if exist
+    String datastreamGroupName = datastreamGroup.getTaskPrefix();
+
+
+    if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
+      //Update datastream to make sure the regex change will get reflected
+      _partitionDiscoveryThreadMap.get(datastreamGroupName).setDatastream(datastreamGroup.getDatastreams().get(0));
+    } else {
+      PartitionDiscoveryThread partitionDiscoveryThread =
+          new PartitionDiscoveryThread(datastreamGroup.getTaskPrefix(), datastreamGroup.getDatastreams().get(0));
+      partitionDiscoveryThread.start();
+      _partitionDiscoveryThreadMap.put(datastreamGroupName, partitionDiscoveryThread);
+      _log.info("PartitionListener for {} registered", datastreamGroupName);
+    }_log.info("initial subscribed partitions {}", getSubscribedPartitions(datastreamGroupName));
+
   }
 
   private Consumer<?, ?> createConsumer(Properties consumerProps, String bootstrapServers, String groupId) {
@@ -107,41 +132,83 @@ public class KafkaTopicPartitionListener extends Thread implements PartitionList
     return _kafkaConsumerFactory.createConsumer(properties);
   }
 
-  /**
-   * doc
-   */
-  //TODO fault recovery
-  public void run() {
-    String bootstrapValue = String.join(KafkaConnectionString.BROKER_LIST_DELIMITER,
-        _sourceConnection.getBrokers().stream().map(KafkaBrokerAddress::toString).collect(Collectors.toList()));
-    _consumer = createConsumer(_consumerProperties, bootstrapValue,
-        _groupIdConstructor.constructGroupId(_datastream) + DEST_CONSUMER_GROUP_ID_SUFFIX);
+  class PartitionDiscoveryThread extends Thread {
+    private Consumer<?, ?> _consumer;
+    private Datastream _datastream;
+    private String _datastreamGroupName;
+    private List<String> _subscribedPartitions = new ArrayList<>();
+    private Pattern _topicPattern;
 
-    _log.info("Fetch thread for {} started", _datastream.getName());
-    while (!isInterrupted() && !_shutdown) {
-      try {
-        // If partition is changed
-        List<String> newPartitionInfo = getPartitionsInfo();
-        _log.info("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
-            , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
+    public PartitionDiscoveryThread(String datastreamGroupName, Datastream datastream) {
+      _datastream  = datastream;
+      _datastreamGroupName = datastreamGroupName;
+      _topicPattern = Pattern.compile(
+          KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString()).getTopicName());
+    }
 
-        if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
-          _log.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
+    public void setDatastream(Datastream datastream) {
+      _datastream = datastream;
+    }
+
+    private List<String> getPartitionsInfo() {
+      Map<String, List<PartitionInfo>> sourceTopics = _consumer.listTopics();
+      List<TopicPartition> topicPartitions = sourceTopics.keySet().stream()
+          .filter(t1 -> _topicPattern.matcher(t1).matches()).flatMap(t2 ->
+              sourceTopics.get(t2).stream().map(partitionInfo ->
+                  new TopicPartition(partitionInfo.topic(), partitionInfo.partition()))).collect(Collectors.toList());
+
+      return topicPartitions.stream().map(TopicPartition::toString).sorted().collect(Collectors.toList());
+    }
+
+
+    public void run() {
+      String bootstrapValue = String.join(KafkaConnectionString.BROKER_LIST_DELIMITER,
+          KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString())
+              .getBrokers().stream().map(KafkaBrokerAddress::toString).collect(Collectors.toList()));
+      _consumer = createConsumer(_consumerProperties, bootstrapValue,
+          _groupIdConstructor.constructGroupId(_datastream) + DEST_CONSUMER_GROUP_ID_SUFFIX);
+
+      _log.info("Fetch thread for {} started", _datastream.getName());
+      while (!isInterrupted() && !_shutdown) {
+        try {
+          // If partition is changed
+          List<String> newPartitionInfo = getPartitionsInfo();
+          _log.info("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
               , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
-          Set<String> addedPartitions = new HashSet<>(newPartitionInfo);
-          addedPartitions.removeAll(_subscribedPartitions);
-          _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
-          _callback.accept(Collections.synchronizedList(new ArrayList<String>(addedPartitions)));
+
+          if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
+            _log.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
+                , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
+            Set<String> addedPartitions = new HashSet<>(newPartitionInfo);
+            addedPartitions.removeAll(_subscribedPartitions);
+            _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
+            _discoveryCallback.accept(_datastreamGroupName,
+                Collections.synchronizedList(new ArrayList<String>(addedPartitions)));
+          }
+          Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
+        } catch (Throwable t) {
+          _log.error("detect error for thread " + _datastream.getName() + ", ex: ", t);
         }
-        Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
-      } catch (Throwable t) {
-        _log.error("detect error for thread " + _datastream.getName() + ", ex: ", t);
+      }
+      if (_consumer != null) {
+        _consumer.close();
+      }
+      _consumer = null;
+      _log.info("Fetch thread for {} stopped", _datastream.getName());
+    }
+  }
+
+  class PartitionReassignmentThread extends Thread  {
+    public void run() {
+      while (!isInterrupted() && !_shutdown) {
+        try {
+          _reassignmentCallback.accept(getRegisteredDatastreamGroups());
+          Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
+        } catch (Exception ex) {
+          _log.error("detect error for thread PartitionReassignmentThread, ex: ", ex);
+        }
       }
     }
-    if (_consumer != null) {
-      _consumer.close();
-    }
-    _consumer = null;
-    _log.info("Fetch thread for {} stopped", _datastream.getName());
+
   }
 }

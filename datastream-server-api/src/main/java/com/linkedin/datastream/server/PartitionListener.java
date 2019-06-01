@@ -6,8 +6,7 @@
 package com.linkedin.datastream.server;
 
 import java.util.List;
-import com.linkedin.datastream.common.Datastream;
-import java.util.Set;
+import java.util.function.BiConsumer;
 
 
 /**
@@ -18,15 +17,29 @@ public interface PartitionListener {
   /**
    * doc
    */
-  void start(Datastream datastream, java.util.function.Consumer<List<String>> callback);
+  void start(BiConsumer<String, List<String>> discoveryCallback,
+      java.util.function.Consumer<List<String>> reassignmentCallback);
 
   /**
    * doc
    */
+  List<String> getSubscribedPartitions(String datastreamGroupName);
+
+
   void shutdown();
 
   /**
-   * doc
+   *
    */
-  List<String> getSubscribedPartitions();
+  void register(DatastreamGroup datastreamGroup);
+
+  /**
+   *
+   */
+  void deregister(String datastreamGroupName);
+
+  /**
+   *
+   */
+  List<String> getRegisteredDatastreamGroups();
 }

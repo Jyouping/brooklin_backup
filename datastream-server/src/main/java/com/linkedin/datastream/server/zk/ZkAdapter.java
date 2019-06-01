@@ -1194,6 +1194,7 @@ public class ZkAdapter {
     _zkclient.ensurePath(KeyBuilder.instance(_cluster, _instanceName));
     _zkclient.ensurePath(KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix));
 
+
     partitions.stream().forEach(p -> {
           String path = KeyBuilder.pendingPartitions(_cluster, taskPrefix, p);
           if (!_zkclient.exists(path)) {
@@ -1201,9 +1202,10 @@ public class ZkAdapter {
           }
         }
     );
+    LOG.info("add pending partitions to zk {}", partitions);
   }
 
-  public synchronized List<String> getToAssignPartitions(String taskPrefix) {
+  public synchronized List<String> popPendingPartitions(String taskPrefix) {
     //apply lock
     String path = KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix);
     if (_zkclient.exists(path)) {
