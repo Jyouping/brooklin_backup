@@ -988,12 +988,13 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
                 .filter(datastreamTask -> dgName.equals(datastreamTask.getTaskPrefix()))
                 .collect(Collectors.toList());
             List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName);
+            List<String> freshPartitions = partitionListener.popFreshPartitions(dgName);
 
             List<String> pendingPartitions = _adapter.getPendingPartitions(dgName);
 
             //TODO: implement fresh partitions
             partitionAssignmentStrategy.assign(assignedTasks, pendingPartitions,
-                new ArrayList<>(), subscribedPartitions);
+                freshPartitions, subscribedPartitions);
 
             _log.info("Partition assignment completed: datastreamGroup, taskPrefix {}, assignment {} ", dgName,
                 assignedTasks);
@@ -1151,10 +1152,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
     PartitionListener partitionListener = null;
     if (partitionListenerFactory != null) {
-      //TODO refactor callbacks
       partitionListener = partitionListenerFactory.createPartitionListener(_clusterName,  _config.getConfigProperties());
       partitionListener.start((datastreamGroupName, newPartitions) -> {
-        _adapter.addPendingPartitions(datastreamGroupName, newPartitions);
+        //remove this as fresh partitions
+        //_adapter.addPendingPartitions(datastreamGroupName, newPartitions);
+
         _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
       });
 

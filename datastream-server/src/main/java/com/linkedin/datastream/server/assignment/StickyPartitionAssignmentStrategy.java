@@ -54,14 +54,15 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
     // Step 3: Calculated the fresh partitions, we cannot directly get fresh partitions from subscribedPartitions
     // as it will have a race condition that the partition is free from the task but has't been put into partition pool
     // The fresh partition must been get from subscriptions
-    freshPartitions.removeAll(toAssignPendingPartitions);
-    freshPartitions.removeAll(previousSubscribedPartitions);
+    List<String> toAssignFreshPartitions = new ArrayList<>(freshPartitions);
+    toAssignFreshPartitions.removeAll(toAssignPendingPartitions);
+    toAssignFreshPartitions.removeAll(previousSubscribedPartitions);
 
     // Step 4: assign the fresh and pending partitions from partition pool
     Collections.shuffle(toAssignPendingPartitions);
-    Collections.shuffle(freshPartitions);
+    Collections.shuffle(toAssignFreshPartitions);
 
-    int size = freshPartitions.size() + toAssignPendingPartitions.size() + previousSubscribedPartitions.size();
+    int size = toAssignFreshPartitions.size() + toAssignPendingPartitions.size() + previousSubscribedPartitions.size();
 
     int maxPartitionPerTask = (int) Math.ceil((double) size / (double) assignedTask.size());
 
@@ -75,10 +76,10 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
       ++i;
     }
 
-    while (freshPartitions.size() > 0) {
+    while (toAssignFreshPartitions.size() > 0) {
       DatastreamTask task = assignedTask.get(i % assignedTask.size());
       if (task.getPartitionsV2().size() < maxPartitionPerTask) {
-        task.assignPartitions(Collections.singletonList(freshPartitions.remove(freshPartitions.size() - 1)), true);
+        task.assignPartitions(Collections.singletonList(toAssignFreshPartitions.remove(toAssignFreshPartitions.size() - 1)), true);
       }
       ++i;
     }

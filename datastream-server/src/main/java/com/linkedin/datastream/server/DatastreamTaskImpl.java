@@ -75,7 +75,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   private List<String> _partitionsV2;
 
   // Status to indicate if instance has hooked up and process this object
-  private boolean _isHooked;
+  private boolean _isLocked;
   private ZkAdapter _zkAdapter;
 
   private Map<String, String> _properties = new HashMap<>();
@@ -252,7 +252,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void acquire(Duration timeout) {
-    _isHooked = true;
+    _isLocked = true;
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     try {
       _zkAdapter.acquireTask(this, timeout);
@@ -267,7 +267,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public void release() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     _zkAdapter.releaseTask(this);
-    _isHooked = false;
+    _isLocked = false;
   }
 
   @JsonIgnore
@@ -397,7 +397,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void revokePartitions(List<String> partitions) {
-    if (_isHooked) {
+    if (_isLocked) {
       _zkAdapter.addPendingPartitions(_taskPrefix, partitions);
     }
     _partitionsV2.removeAll(partitions);

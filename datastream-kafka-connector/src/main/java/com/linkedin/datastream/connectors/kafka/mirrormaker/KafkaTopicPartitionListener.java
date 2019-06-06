@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -77,9 +79,16 @@ public class KafkaTopicPartitionListener implements PartitionListener {
 
   @Override
   public List<String> getSubscribedPartitions(String datastreamGroupName) {
-    return _partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions;
+    return Collections.unmodifiableList(_partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions);
   }
 
+
+  @Override
+  public List<String> popFreshPartitions(String datastreamGroupName) {
+    List<String> freshPartitions = new ArrayList<>();
+    _partitionDiscoveryThreadMap.get(datastreamGroupName)._freshPartitions.drainTo(freshPartitions);
+    return Collections.unmodifiableList(freshPartitions);
+  }
   @Override
   public void deregister(String datastreamGroupName) {
     _log.info("attempted to deregister datastream group {}", datastreamGroupName);
@@ -128,6 +137,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     private Datastream _datastream;
     private String _datastreamGroupName;
     private List<String> _subscribedPartitions = new ArrayList<>();
+    private BlockingQueue<String> _freshPartitions = new LinkedBlockingDeque<>();
     private Pattern _topicPattern;
 
     public PartitionDiscoveryThread(String datastreamGroupName, Datastream datastream) {
@@ -173,6 +183,9 @@ public class KafkaTopicPartitionListener implements PartitionListener {
             Set<String> addedPartitions = new HashSet<>(newPartitionInfo);
             addedPartitions.removeAll(_subscribedPartitions);
             _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
+            for (String p : addedPartitions) {
+              _freshPartitions.put(p);
+            }
             _discoveryCallback.accept(_datastreamGroupName,
                 Collections.synchronizedList(new ArrayList<String>(addedPartitions)));
           }

@@ -1245,7 +1245,6 @@ public class ZkAdapter {
         String pendingPartitionsPath = KeyBuilder.getPendingPartitionsForDatastream(_cluster, name);
         if (_zkclient.exists(pendingPartitionsPath)) {
           List<String> partitions = _zkclient.getChildren(pendingPartitionsPath);
-          LOG.info("peek pending partitions from zk {}", partitions);
           if (partitions.size() > 0) {
             return true;
           }
