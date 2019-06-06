@@ -142,4 +142,11 @@ public interface DatastreamTask {
    * doc
    */
   void revokePartitions(List<String> partitions);
+
+  /**
+   *
+   * @param partitions
+   */
+  void assignPartitions(List<String> partitions, boolean isFreshPartition);
+
 }

@@ -50,9 +50,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
   private boolean _shutdown;
 
   private Map<String, PartitionDiscoveryThread> _partitionDiscoveryThreadMap = new HashMap<>();
-  private Thread _partitionReassignmentThread;
   private java.util.function.BiConsumer<String, List<String>>_discoveryCallback;
-  private java.util.function.Consumer<List<String>> _reassignmentCallback;
 
   /**
    * doc
@@ -67,21 +65,14 @@ public class KafkaTopicPartitionListener implements PartitionListener {
 
   //TODO: how do you perform an update to a datastream
   @Override
-  public void start(BiConsumer<String, List<String>> discoveryCallback,
-      java.util.function.Consumer<List<String>> reassignmentCallback) {
+  public void start(BiConsumer<String, List<String>> discoveryCallback) {
     _discoveryCallback = discoveryCallback;
-    _reassignmentCallback = reassignmentCallback;
-    _partitionReassignmentThread = new PartitionReassignmentThread();
-    _partitionReassignmentThread.start();
   }
 
   @Override
   public void shutdown() {
     _shutdown = true;
     _partitionDiscoveryThreadMap.values().forEach(Thread::interrupt);
-    if (_partitionReassignmentThread != null) {
-      _partitionReassignmentThread.interrupt();
-    }
   }
 
   @Override
@@ -196,19 +187,5 @@ public class KafkaTopicPartitionListener implements PartitionListener {
       _consumer = null;
       _log.info("Fetch thread for {} stopped", _datastream.getName());
     }
-  }
-
-  class PartitionReassignmentThread extends Thread  {
-    public void run() {
-      while (!isInterrupted() && !_shutdown) {
-        try {
-          _reassignmentCallback.accept(getRegisteredDatastreamGroups());
-          Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
-        } catch (Exception ex) {
-          _log.error("detect error for thread PartitionReassignmentThread, ex: ", ex);
-        }
-      }
-    }
-
   }
 }

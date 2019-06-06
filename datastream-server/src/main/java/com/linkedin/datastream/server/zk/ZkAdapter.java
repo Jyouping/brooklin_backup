@@ -1192,7 +1192,7 @@ public class ZkAdapter {
    */
   public void addPendingPartitions(String taskPrefix, List<String> partitions) {
     _zkclient.ensurePath(KeyBuilder.instance(_cluster, _instanceName));
-    _zkclient.ensurePath(KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix));
+    _zkclient.ensurePath(KeyBuilder.getPendingPartitionsForDatastream(_cluster, taskPrefix));
 
 
     partitions.stream().forEach(p -> {
@@ -1205,9 +1205,17 @@ public class ZkAdapter {
     LOG.info("add pending partitions to zk {}", partitions);
   }
 
-  public synchronized List<String> popPendingPartitions(String taskPrefix) {
+  public void deletePendingPartitions(String taskPrefix, List<String> partitionNames) {
+    try {
+      partitionNames.forEach(name -> _zkclient.delete(KeyBuilder.pendingPartitions(_cluster, taskPrefix, name)));
+    } catch (Exception ex) {
+      LOG.info("ERROR in deleting pending partitions", ex);
+    }
+  }
+
+  public List<String> popPartitions(String taskPrefix) {
     //apply lock
-    String path = KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix);
+    String path = KeyBuilder.getPendingPartitionsForDatastream(_cluster, taskPrefix);
     if (_zkclient.exists(path)) {
       List<String> toAssignPartitions = new ArrayList<>();
       _zkclient.getChildren(path).stream().forEach(p -> {
@@ -1223,15 +1231,23 @@ public class ZkAdapter {
   /*
    *
    */
-  public List<String> peekPendingPartitions(String taskPrefix) {
+  public boolean checkNonEmptyPendingPartitions() {
     //apply lock
-    String path = KeyBuilder.getAllPendingPartitions(_cluster, taskPrefix);
+    String path = KeyBuilder.getAllPendingPartitions(_cluster);
     if (_zkclient.exists(path)) {
-      List<String> partitions = _zkclient.getChildren(path);
-      LOG.info("peek pending partitions from zk {}", partitions);
-      return partitions;
+      List<String> datastreamName = _zkclient.getChildren(path);
+      for (String name : datastreamName) {
+        String pendingPartitionsPath = KeyBuilder.getPendingPartitionsForDatastream(_cluster, name);
+        if (_zkclient.exists(pendingPartitionsPath)) {
+          List<String> partitions = _zkclient.getChildren(path);
+          LOG.info("peek pending partitions from zk {}", partitions);
+          if (partitions.size() > 0) {
+            return true;
+          }
+        }
+      }
     }
-    return Collections.emptyList();
+    return false;
   }
 
 }

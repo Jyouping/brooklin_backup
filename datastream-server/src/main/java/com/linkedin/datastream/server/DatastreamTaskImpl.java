@@ -74,7 +74,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   private List<Integer> _partitions;
   private List<String> _partitionsV2;
 
-
+  private boolean _isLocked;
   private ZkAdapter _zkAdapter;
 
   private Map<String, String> _properties = new HashMap<>();
@@ -196,21 +196,21 @@ public class DatastreamTaskImpl implements DatastreamTask {
   }
 
   /**
-   * Set partitions (in string) associated with the task
-   * @param partitions List of partitions to associate with task.
-   */
-  public void setPartitionsV2(List<String> partitions) {
-    Validate.notNull(partitions);
-    _partitionsV2 = partitions;
-  }
-
-  /**
    * Set partitions associated with the task.
    * @param partitions List of partitions to associate with task.
    */
   public void setPartitions(List<Integer> partitions) {
     Validate.notNull(partitions);
     _partitions = partitions;
+  }
+
+  /**
+   * Set partitions associated with the task.
+   * @param partitions List of partitions to associate with task.
+   */
+  public void setPartitionsV2(List<String> partitions) {
+    Validate.notNull(partitions);
+    _partitionsV2 = _partitionsV2;
   }
 
   @JsonIgnore
@@ -251,6 +251,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void acquire(Duration timeout) {
+    _isLocked = true;
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     try {
       _zkAdapter.acquireTask(this, timeout);
@@ -265,6 +266,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public void release() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     _zkAdapter.releaseTask(this);
+    _isLocked = false;
   }
 
   @JsonIgnore
@@ -394,7 +396,17 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void revokePartitions(List<String> partitions) {
+    if (_isLocked) {
+      _zkAdapter.addPendingPartitions(_taskPrefix, partitions);
+    }
     _partitionsV2.removeAll(partitions);
-    _zkAdapter.addPendingPartitions(_taskPrefix, partitions);
+  }
+
+  @Override
+  public void assignPartitions(List<String> partitions, boolean isFreshPartition) {
+    if (!isFreshPartition) {
+      _zkAdapter.deletePendingPartitions(_taskPrefix, partitions);
+    }
+    _partitionsV2.addAll(partitions);
   }
 }

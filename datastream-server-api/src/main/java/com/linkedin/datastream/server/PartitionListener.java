@@ -17,8 +17,7 @@ public interface PartitionListener {
   /**
    * doc
    */
-  void start(BiConsumer<String, List<String>> discoveryCallback,
-      java.util.function.Consumer<List<String>> reassignmentCallback);
+  void start(BiConsumer<String, List<String>> discoveryCallback);
 
   /**
    * doc

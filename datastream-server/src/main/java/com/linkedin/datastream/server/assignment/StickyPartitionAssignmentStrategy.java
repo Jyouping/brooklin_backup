@@ -30,8 +30,6 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
   private static final int MAX_ALLOW_INBALANCE_THRESHOLD = 2;
 
-  //TODO: adopt generations for datastreamTask for immutability
-
   @Override
   public void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> subscribedPartitions) {
     // Assignment logic 1) filter toReassignPartition from subscribedPartitions

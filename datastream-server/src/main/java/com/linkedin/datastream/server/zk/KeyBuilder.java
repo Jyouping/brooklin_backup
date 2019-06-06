@@ -66,19 +66,20 @@ public final class KeyBuilder {
   private static final String DATASTREAM_TASK_LOCK = CONNECTOR + "/%s/lock";
 
   /**
-   * Task lock node under connectorType/task
+   *
    */
-  private static final String PARTITION_QUEUE_LOCK = CLUSTER + "/%s/partitions/lock";
+  private static final String ALL_PENDING_PARTITIONS = CLUSTER + "partitions/pending";
 
   /**
    *
    */
-  private static final String PENDING_PARTITIONS = CLUSTER + "/%s/partitions/pending/%s";
+  private static final String DATASTREAM_WITH_PENDING_PARTITION = ALL_PENDING_PARTITIONS + "/%s";
 
   /**
    *
    */
-  private static final String ALL_PENDING_PARTITIONS = CLUSTER + "/%s/partitions/pending";
+  private static final String PENDING_PARTITIONS = DATASTREAM_WITH_PENDING_PARTITION + "/%s";
+
 
   /**
    * Get the root level ZooKeeper znode of a Brooklin cluster
@@ -284,7 +285,16 @@ public final class KeyBuilder {
    * @param taskPrefix
    * @return
    */
-  public static String getAllPendingPartitions(String cluster, String taskPrefix) {
-    return String.format(ALL_PENDING_PARTITIONS, cluster, taskPrefix).replaceAll("//", "/");
+  public static String getPendingPartitionsForDatastream(String cluster, String taskPrefix) {
+    return String.format(DATASTREAM_WITH_PENDING_PARTITION, cluster, taskPrefix).replaceAll("//", "/");
+  }
+
+  /**
+   *
+   * @param cluster
+   * @return
+   */
+  public static String getAllPendingPartitions(String cluster) {
+    return String.format(ALL_PENDING_PARTITIONS, cluster).replaceAll("//", "/");
   }
 }

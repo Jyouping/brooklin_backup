@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -35,7 +34,6 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.Validate;
 import org.apache.commons.lang.exception.ExceptionUtils;
@@ -178,6 +176,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   private final Map<String, TransportProviderAdmin> _transportProviderAdmins = new HashMap<>();
   private final CoordinatorEventBlockingQueue _eventQueue;
   private final CoordinatorEventProcessor _eventThread;
+  private final PartitionPoolThread _partitionPoolThread;
+
+
   private final ThreadPoolExecutor _assignmentChangeThreadPool;
   private final String _clusterName;
   private final CoordinatorConfig _config;
@@ -237,6 +238,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _eventQueue = new CoordinatorEventBlockingQueue();
     _eventThread = new CoordinatorEventProcessor();
     _eventThread.setDaemon(true);
+    _partitionPoolThread = new PartitionPoolThread();
 
     _dynamicMetricsManager = DynamicMetricsManager.getInstance();
     _dynamicMetricsManager.registerGauge(MODULE, NUM_PAUSED_DATASTREAMS_GROUPS, () -> _pausedDatastreamsGroups.get());
@@ -262,6 +264,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   public void start() {
     _log.info("Starting coordinator");
     _eventThread.start();
+    _partitionPoolThread.start();
     _adapter.connect();
 
     for (String connectorType : _connectors.keySet()) {
@@ -304,6 +307,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       } catch (InterruptedException e) {
         _log.warn("Exception caught while stopping coordinator", e);
       }
+    }
+
+    if (_partitionPoolThread.isAlive()) {
+      _partitionPoolThread.interrupt();
     }
 
     // Stopping all the connectors so that they stop producing.
@@ -982,7 +989,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
                 .collect(Collectors.toList());
             List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName);
 
-            List<String> pendingPartitions = _adapter.popPendingPartitions(dgName);
+            List<String> pendingPartitions = _adapter.popPartitions(dgName);
 
             partitionAssignmentStrategy.assign(assignedTasks, pendingPartitions, subscribedPartitions);
 
@@ -1147,14 +1154,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       partitionListener.start((datastreamGroupName, newPartitions) -> {
         _adapter.addPendingPartitions(datastreamGroupName, newPartitions);
         _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
-      }, datastreamGroupNames -> {
-        Optional<List<String>> maybePendingPartitions = datastreamGroupNames.stream()
-            .map(_adapter::peekPendingPartitions).filter(list -> !list.isEmpty()).findAny();
-
-        maybePendingPartitions.ifPresent(t -> {
-          _log.info("Detect pending partitions, scheduled {}", CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
-          _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
-        });
       });
 
     }
@@ -1483,6 +1482,22 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         }
       }
       _log.info("END CoordinatorEventProcessor");
+    }
+  }
+
+  private class PartitionPoolThread extends Thread  {
+    public void run() {
+      while (!isInterrupted()) {
+        try {
+          if (_adapter.checkNonEmptyPendingPartitions()) {
+            _log.info("Detect pending partitions, scheduled {}", CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
+            _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_ASSIGNMENT_EVENT);
+          }
+          Thread.sleep(30000);
+        } catch (Exception ex) {
+          _log.error("detect error for thread PartitionPoolThread, ex: ", ex);
+        }
+      }
     }
   }
 }
