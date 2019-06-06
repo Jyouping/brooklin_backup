@@ -989,9 +989,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
                 .collect(Collectors.toList());
             List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName);
 
-            List<String> pendingPartitions = _adapter.popPartitions(dgName);
+            List<String> pendingPartitions = _adapter.getPendingPartitions(dgName);
 
-            partitionAssignmentStrategy.assign(assignedTasks, pendingPartitions, subscribedPartitions);
+            //TODO: implement fresh partitions
+            partitionAssignmentStrategy.assign(assignedTasks, pendingPartitions,
+                new ArrayList<>(), subscribedPartitions);
 
             _log.info("Partition assignment completed: datastreamGroup, taskPrefix {}, assignment {} ", dgName,
                 assignedTasks);

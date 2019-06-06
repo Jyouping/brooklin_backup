@@ -1213,14 +1213,14 @@ public class ZkAdapter {
     }
   }
 
-  public List<String> popPartitions(String taskPrefix) {
+  public List<String> getPendingPartitions(String taskPrefix) {
     //apply lock
     String path = KeyBuilder.getPendingPartitionsForDatastream(_cluster, taskPrefix);
     if (_zkclient.exists(path)) {
       List<String> toAssignPartitions = new ArrayList<>();
       _zkclient.getChildren(path).stream().forEach(p -> {
         toAssignPartitions.add(p);
-        _zkclient.delete(KeyBuilder.pendingPartitions(_cluster, taskPrefix, p));
+        //_zkclient.delete(KeyBuilder.pendingPartitions(_cluster, taskPrefix, p));
       });
       LOG.info("retrieve pending partitions from zk {}", toAssignPartitions);
       return toAssignPartitions;
@@ -1233,13 +1233,18 @@ public class ZkAdapter {
    */
   public boolean checkNonEmptyPendingPartitions() {
     //apply lock
+    //TODO NPE check for zkclient
+    if (_zkclient == null) {
+      LOG.info("Waiting for Zk client to be started");
+      return false;
+    }
     String path = KeyBuilder.getAllPendingPartitions(_cluster);
     if (_zkclient.exists(path)) {
       List<String> datastreamName = _zkclient.getChildren(path);
       for (String name : datastreamName) {
         String pendingPartitionsPath = KeyBuilder.getPendingPartitionsForDatastream(_cluster, name);
         if (_zkclient.exists(pendingPartitionsPath)) {
-          List<String> partitions = _zkclient.getChildren(path);
+          List<String> partitions = _zkclient.getChildren(pendingPartitionsPath);
           LOG.info("peek pending partitions from zk {}", partitions);
           if (partitions.size() > 0) {
             return true;

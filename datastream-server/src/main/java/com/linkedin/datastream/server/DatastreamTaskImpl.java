@@ -74,7 +74,8 @@ public class DatastreamTaskImpl implements DatastreamTask {
   private List<Integer> _partitions;
   private List<String> _partitionsV2;
 
-  private boolean _isLocked;
+  // Status to indicate if instance has hooked up and process this object
+  private boolean _isHooked;
   private ZkAdapter _zkAdapter;
 
   private Map<String, String> _properties = new HashMap<>();
@@ -192,7 +193,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public List<String> getPartitionsV2() {
-    return _partitionsV2;
+    return Collections.unmodifiableList(_partitionsV2);
   }
 
   /**
@@ -205,12 +206,12 @@ public class DatastreamTaskImpl implements DatastreamTask {
   }
 
   /**
-   * Set partitions associated with the task.
-   * @param partitions List of partitions to associate with task.
+   * Set partitions associated with the task. This setter is required for json
+   * @param partitionsV2 List of partitions to associate with task.
    */
-  public void setPartitionsV2(List<String> partitions) {
-    Validate.notNull(partitions);
-    _partitionsV2 = _partitionsV2;
+  public void setPartitionsV2(List<String> partitionsV2) {
+    Validate.notNull(partitionsV2);
+    _partitionsV2 = partitionsV2;
   }
 
   @JsonIgnore
@@ -251,7 +252,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void acquire(Duration timeout) {
-    _isLocked = true;
+    _isHooked = true;
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     try {
       _zkAdapter.acquireTask(this, timeout);
@@ -266,7 +267,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public void release() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     _zkAdapter.releaseTask(this);
-    _isLocked = false;
+    _isHooked = false;
   }
 
   @JsonIgnore
@@ -396,7 +397,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void revokePartitions(List<String> partitions) {
-    if (_isLocked) {
+    if (_isHooked) {
       _zkAdapter.addPendingPartitions(_taskPrefix, partitions);
     }
     _partitionsV2.removeAll(partitions);

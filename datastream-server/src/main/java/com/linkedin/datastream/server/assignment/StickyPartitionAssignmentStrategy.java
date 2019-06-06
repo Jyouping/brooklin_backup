@@ -10,92 +10,112 @@ import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
 /**
- * Partition assignment strategy follow with a Sticky round robin assignment
- * The original assignment suffers a minimal disruption unless there is a huge imbalance
- * At the same time, any new assigned partition will be shuffled so that we can generate
- * a slightly different assignment if there is a need to rebalance all
- * It follows three steps
- * 1) Removed the partitions that no longer need to be unassigned
- * 2) move some partitions from heavily imbalanced task to toAssignPartitions
- * 3) Assign toAssigned according to a round robin assignment
  */
 public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStrategy  {
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
   private static final int MAX_ALLOW_INBALANCE_THRESHOLD = 2;
 
   @Override
-  public void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> subscribedPartitions) {
+  public void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> freshPartitions,
+      List<String> subscribedPartitions) {
     // Assignment logic 1) filter toReassignPartition from subscribedPartitions
     // 2) assign toReassignPartition
 
-    LOG.info("assignment info, task: {}, partitions: {}, subscribedOne: {}",
-        assignedTask, pendingPartition, subscribedPartitions);
-    List<String> toRevokedPartitions = new ArrayList<>();
+    LOG.info("assignment info, task: {}, pendinPartitions: {}, freshPartitions: {}, subscribedOne: {}",
+        assignedTask, pendingPartition, freshPartitions, subscribedPartitions);
 
-    //Step 1: revoke the partitions that no longer can be assigned
+    List<String> previousSubscribedPartitions = new ArrayList<>();
+    //Step 1: revoke the partitions which is removed from subscribed partition
     assignedTask.stream().forEach(t -> {
       List<String> toRemovedPartition = t.getPartitionsV2().stream().filter(p -> !subscribedPartitions.contains(p)).collect(
           Collectors.toList());
-      t.getPartitionsV2().removeAll(toRemovedPartition);
-      toRevokedPartitions.addAll(toRemovedPartition);
+      if (!toRemovedPartition.isEmpty()) {
+        t.revokePartitions(toRemovedPartition);
+        LOG.info("Partitions {} is removed as it was no longer subscribed", toRemovedPartition);
+      }
+      previousSubscribedPartitions.addAll(t.getPartitionsV2());
     });
 
 
-    // Step2: drop the partitions that which is no longer subscribed from to Assigned partitions
-    List<String> toAssignPartitions = new ArrayList<>(pendingPartition.stream()
+    // Step2: drop the pending partitions that which is no longer subscribed from to Assigned partitions
+    List<String> toAssignPendingPartitions = new ArrayList<>(pendingPartition.stream()
         .filter(p -> subscribedPartitions.contains(p)).collect(Collectors.toList()));
 
 
-    // Step 2: invoke heavily imbalanced partition
+    // Step 3: Calculated the fresh partitions, we cannot directly get fresh partitions from subscribedPartitions
+    // as it will have a race condition that the partition is free from the task but has't been put into partition pool
+    // The fresh partition must been get from subscriptions
+    freshPartitions.removeAll(toAssignPendingPartitions);
+    freshPartitions.removeAll(previousSubscribedPartitions);
 
-    int assignedPartitionSize = assignedTask.stream().map(t -> t.getPartitionsV2().size())
-        .mapToInt(Integer::intValue).sum();
+    // Step 4: assign the fresh and pending partitions from partition pool
+    Collections.shuffle(toAssignPendingPartitions);
+    Collections.shuffle(freshPartitions);
 
-    int maxPartitionPerTask = (int) Math.ceil((double) (assignedPartitionSize + toAssignPartitions.size()) / (double) assignedTask.size());
+    int size = freshPartitions.size() + toAssignPendingPartitions.size() + previousSubscribedPartitions.size();
 
-    assignedTask.stream().forEach(task -> {
-      while (task.getPartitionsV2().size() > maxPartitionPerTask + MAX_ALLOW_INBALANCE_THRESHOLD) {
-        toRevokedPartitions.add(task.getPartitionsV2().remove(task.getPartitionsV2().size() - 1));
-      }
-    });
-
-    // Step 3: assign the remaining partitions
-    Collections.shuffle(toAssignPartitions);
+    int maxPartitionPerTask = (int) Math.ceil((double) size / (double) assignedTask.size());
 
     int i = 0;
-    while (toAssignPartitions.size() > 0) {
-      List<String> taskOwnedPartitions = assignedTask.get(i % assignedTask.size()).getPartitionsV2();
-      if (taskOwnedPartitions.size() < maxPartitionPerTask) {
-        taskOwnedPartitions.add(toAssignPartitions.remove(toAssignPartitions.size() - 1));
+    while (toAssignPendingPartitions.size() > 0) {
+      DatastreamTask task = assignedTask.get(i % assignedTask.size());
+
+      if (task.getPartitionsV2().size() < maxPartitionPerTask) {
+        task.assignPartitions(Collections.singletonList(toAssignPendingPartitions.remove(toAssignPendingPartitions.size() - 1)), false);
       }
       ++i;
     }
 
-    if (toRevokedPartitions.size() > 0) {
-      LOG.info("To revoke partitions {}", toRevokedPartitions);
+    while (freshPartitions.size() > 0) {
+      DatastreamTask task = assignedTask.get(i % assignedTask.size());
+      if (task.getPartitionsV2().size() < maxPartitionPerTask) {
+        task.assignPartitions(Collections.singletonList(freshPartitions.remove(freshPartitions.size() - 1)), true);
+      }
+      ++i;
     }
-    //TODO fix
-    //sanityChecks(assignedTask, subscribedPartitions);
+
+
+    //Step 4: revoke heavily imbalanced task, put into partition pool
+    List<String> toMovePartitions = new ArrayList<>();
+
+    assignedTask.stream().forEach(task -> {
+      while (task.getPartitionsV2().size() > maxPartitionPerTask + MAX_ALLOW_INBALANCE_THRESHOLD) {
+        String toMovePartition = task.getPartitionsV2().get(task.getPartitionsV2().size() - 1);
+        task.revokePartitions(Collections.singletonList(toMovePartition));
+        toMovePartitions.add(toMovePartition);
+      }
+    });
+
+
+    if (toMovePartitions.size() > 0) {
+      LOG.info("To move partitions {}", toMovePartitions);
+    }
+
+    LOG.info("Assignment info {}", assignedTask);
+   // sanityChecks(assignedTask, toMovePartitions, subscribedPartitions);
   }
 
-  private void sanityChecks(List<DatastreamTask> assignedTask, List<String> partitions) {
+  private void sanityChecks(List<DatastreamTask> assignedTask, List<String> toMovePartitions, List<String> allPartitions) {
     int total = 0;
-    List<String> toCheckPartitions = new ArrayList<>(partitions);
+    List<String> toCheckPartitions = new ArrayList<>(allPartitions);
+    toCheckPartitions.removeAll(toMovePartitions);
 
     for (DatastreamTask task : assignedTask) {
       total += task.getPartitionsV2().size();
       toCheckPartitions.removeAll(task.getPartitionsV2());
     }
-    if (total != partitions.size()) {
+    if (total != allPartitions.size()) {
       throw new DatastreamRuntimeException(String.format("Validation failed after assignment, assigned partitions "
-          + "size: {} is not equal to new partitions size: {}", total, partitions.size()));
+          + "size: {} is not equal to new partitions size: {}", total, allPartitions.size()));
     }
     if (toCheckPartitions.size() > 0) {
       throw new DatastreamRuntimeException(String.format("Validation failed after assignment, "

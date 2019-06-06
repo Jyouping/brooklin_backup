@@ -346,6 +346,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
       //TODO avoid hard commit recurrsion? and better cache
       Set<TopicPartition> newTopicPartition  = getAssignedTopicPartitionFromTask();
       if (!newTopicPartition.equals(_consumerAssignment)) {
+        LOG.info("new topic partitions {}, old partitions {}", newTopicPartition, _consumerAssignment);
         //_logger.info("Try to assignment changed, assigned with new partitions: {}", newTopicPartition);
         Set<TopicPartition> partitionToRevoke = new HashSet<>(_consumerAssignment);
         // TODO: review the logic here, whats the input for partitions to be revoked
@@ -362,7 +363,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
           this.onPartitionsAssigned(newTopicPartition);
           _consumer.assign(_consumerAssignment);
-          _logger.info("Brooklin controlled assignment completed, task {}", _datastreamTask.getDatastreamTaskName());
+          _logger.info("Brooklin controlled assignment completed, task {}, partitions {}", _datastreamTask.getDatastreamTaskName(), _consumerAssignment);
       }
     }
   }
