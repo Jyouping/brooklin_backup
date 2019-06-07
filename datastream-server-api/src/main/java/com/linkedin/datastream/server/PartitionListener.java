@@ -17,7 +17,7 @@ public interface PartitionListener {
   /**
    * doc
    */
-  void start(BiConsumer<String, List<String>> discoveryCallback);
+  void start(BiConsumer<String, List<String>> changeCallback);
 
   /**
    * doc
@@ -41,7 +41,7 @@ public interface PartitionListener {
   /**
    *
    */
-  void deregister(String datastreamGroupName);
+  void unregister(String datastreamGroupName);
 
   /**
    *

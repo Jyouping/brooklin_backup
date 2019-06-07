@@ -1032,7 +1032,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           .filter(name -> !datastreamGroupNames.contains(name))
           .collect(Collectors.toSet());
 
-      obsoleteDatastream.forEach(dg -> connectorWrapper.getPartitionListener().deregister(dg));
+      obsoleteDatastream.forEach(dg -> connectorWrapper.getPartitionListener().unregister(dg));
 
       _log.info("Start Partition Listener {}", partitionListener);
 

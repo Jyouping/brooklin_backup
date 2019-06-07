@@ -67,8 +67,8 @@ public class KafkaTopicPartitionListener implements PartitionListener {
 
   //TODO: how do you perform an update to a datastream
   @Override
-  public void start(BiConsumer<String, List<String>> discoveryCallback) {
-    _discoveryCallback = discoveryCallback;
+  public void start(BiConsumer<String, List<String>> changeCallback) {
+    _discoveryCallback = changeCallback;
   }
 
   @Override
@@ -90,8 +90,8 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     return Collections.unmodifiableList(freshPartitions);
   }
   @Override
-  public void deregister(String datastreamGroupName) {
-    _log.info("attempted to deregister datastream group {}", datastreamGroupName);
+  public void unregister(String datastreamGroupName) {
+    _log.info("attempted to unregister datastream group {}", datastreamGroupName);
 
     Optional.ofNullable(_partitionDiscoveryThreadMap.remove(datastreamGroupName)).ifPresent(Thread::interrupt);
   }
