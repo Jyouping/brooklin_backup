@@ -1014,8 +1014,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   private void registerPartitionListener(List<DatastreamGroup> datastreamGroups) {
-    //TO DO refactor filter
-    Set<String> datastreamGroupNames = datastreamGroups.stream().map(DatastreamGroup::getTaskPrefix).collect(Collectors.toSet());
+    //We need to register only active datastream for partition listener
+    List<DatastreamGroup> activeDataStreams = datastreamGroups.stream()
+        .filter(dg -> !dg.isPaused()).collect(Collectors.toList());
+    Set<String> datastreamGroupNames = activeDataStreams.stream()
+        .map(DatastreamGroup::getTaskPrefix).collect(Collectors.toSet());
 
 
     for (String connectorType : _connectors.keySet()) {
@@ -1034,9 +1037,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
       obsoleteDatastream.forEach(dg -> connectorWrapper.getPartitionListener().unregister(dg));
 
-      _log.info("Start Partition Listener {}", partitionListener);
 
-      List<DatastreamGroup> datastreamsPerConnectorType = datastreamGroups.stream()
+      List<DatastreamGroup> datastreamsPerConnectorType = activeDataStreams.stream()
           .filter(x -> x.getConnectorName().equals(connectorType))
           .collect(Collectors.toList());
 

@@ -106,18 +106,18 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     //TODO check if exist
     String datastreamGroupName = datastreamGroup.getTaskPrefix();
 
-
     if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
       //Update datastream to make sure the regex change will get reflected
+      //TODO: Should we clear out the assignment when updated?
       _partitionDiscoveryThreadMap.get(datastreamGroupName).setDatastream(datastreamGroup.getDatastreams().get(0));
     } else {
       PartitionDiscoveryThread partitionDiscoveryThread =
           new PartitionDiscoveryThread(datastreamGroup.getTaskPrefix(), datastreamGroup.getDatastreams().get(0));
       partitionDiscoveryThread.start();
       _partitionDiscoveryThreadMap.put(datastreamGroupName, partitionDiscoveryThread);
-      _log.info("PartitionListener for {} registered", datastreamGroupName);
-    }_log.info("initial subscribed partitions {}", getSubscribedPartitions(datastreamGroupName));
-
+        _log.info("PartitionListener for {} registered", datastreamGroupName);
+    }
+    _log.info("initial subscribed partitions {}", getSubscribedPartitions(datastreamGroupName));
   }
 
   private Consumer<?, ?> createConsumer(Properties consumerProps, String bootstrapServers, String groupId) {

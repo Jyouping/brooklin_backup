@@ -1193,7 +1193,7 @@ public class ZkAdapter {
   public void addPendingPartitions(String taskPrefix, List<String> partitions) {
     _zkclient.ensurePath(KeyBuilder.instance(_cluster, _instanceName));
     _zkclient.ensurePath(KeyBuilder.getPendingPartitionsForDatastream(_cluster, taskPrefix));
-
+    //TODO not use ephemeral node
 
     partitions.stream().forEach(p -> {
           String path = KeyBuilder.pendingPartitions(_cluster, taskPrefix, p);

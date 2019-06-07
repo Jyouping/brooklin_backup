@@ -24,6 +24,8 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
   private static final int MAX_ALLOW_INBALANCE_THRESHOLD = 2;
 
+
+  //TODO, get rid of fresh partition, use fresh partition to compute
   @Override
   public void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> freshPartitions,
       List<String> subscribedPartitions) {
@@ -88,6 +90,7 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
     //Step 4: revoke heavily imbalanced task, put into partition pool
     List<String> toMovePartitions = new ArrayList<>();
 
+    // TODO: add to move partition into Zookeeper
     assignedTask.stream().forEach(task -> {
       while (task.getPartitionsV2().size() > maxPartitionPerTask + MAX_ALLOW_INBALANCE_THRESHOLD) {
         String toMovePartition = task.getPartitionsV2().get(task.getPartitionsV2().size() - 1);
