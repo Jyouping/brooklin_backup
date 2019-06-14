@@ -6,12 +6,17 @@
 package com.linkedin.datastream.server.assignment;
 
 import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.server.DatastreamGroup;
 import com.linkedin.datastream.server.DatastreamTask;
+import com.linkedin.datastream.server.DatastreamTaskImpl;
 import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -22,90 +27,131 @@ import org.slf4j.LoggerFactory;
  */
 public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStrategy  {
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
-  private static final int MAX_ALLOW_INBALANCE_THRESHOLD = 2;
 
+  private Map<String, Set<DatastreamTask>> assignSubscribedPartitions(DatastreamGroup dg, Map<String,
+      Set<DatastreamTask>> currentAssignment, List<String> subscribedPartitions) {
+    //Assign
+    LOG.info("assignment info, task: {}, subscribedOne: {}", currentAssignment, subscribedPartitions);
 
-  //TODO, get rid of fresh partition, use fresh partition to compute
+    List<String> assignedPartitions = new ArrayList<>();
+    int totalTaskCount = 0;
+    for (Set<DatastreamTask> tasks : currentAssignment.values()) {
+      Set<DatastreamTask> dgTask = tasks.stream().filter(dg::belongsTo).collect(Collectors.toSet());
+      dgTask.stream().forEach(t -> assignedPartitions.addAll(t.getPartitionsV2()));
+      totalTaskCount += tasks.size();
+    }
+
+    List<String> unassignedPartitions = new ArrayList<>(subscribedPartitions);
+    unassignedPartitions.removeAll(assignedPartitions);
+
+    int maxPartitionPerTask = (int) Math.ceil((double) subscribedPartitions.size() / (double) totalTaskCount);
+    LOG.info("maxPartitionPerTask {}, task count {}", maxPartitionPerTask, totalTaskCount);
+
+    Collections.shuffle(unassignedPartitions);
+
+    //update the assignment
+    Map<String, Set<DatastreamTask>> newAssignment = new HashMap<>();
+
+    currentAssignment.keySet().stream().forEach(instance -> {
+      Set<DatastreamTask> tasks = currentAssignment.get(instance);
+      Set<DatastreamTask> newAssignedTask = tasks.stream().map(task -> {
+        if (!dg.belongsTo(task)) {
+          return task;
+        } else {
+          Set<String> partitions = new HashSet<>(task.getPartitionsV2());
+          partitions.retainAll(subscribedPartitions);
+
+          //We need to create new task if the partition is changed
+          boolean partitionChanged = partitions.size() != task.getPartitionsV2().size();
+
+          while(partitions.size() < maxPartitionPerTask && unassignedPartitions.size() > 0) {
+            partitions.add(unassignedPartitions.remove(unassignedPartitions.size() - 1));
+            partitionChanged = true;
+          }
+
+          if (partitionChanged) {
+            return new DatastreamTaskImpl((DatastreamTaskImpl)task, partitions);
+          } else {
+            return task;
+          }
+        }
+      }).collect(Collectors.toSet());
+      newAssignment.put(instance, newAssignedTask);
+    });
+    LOG.info("new assignment info, task: {}, subscribedOne: {}", newAssignment, subscribedPartitions);
+
+    return newAssignment;
+  }
+
   @Override
-  public void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> freshPartitions,
-      List<String> subscribedPartitions) {
-    // Assignment logic 1) filter toReassignPartition from subscribedPartitions
-    // 2) assign toReassignPartition
+  public Map<String, Set<DatastreamTask>> assign(DatastreamGroup dg,
+      Map<String, Set<DatastreamTask>> currentAssignment,
+      Map<String, Set<String>> suggestAssignment, List<String> subscribedPartitions) {
 
-    LOG.info("assignment info, task: {}, pendinPartitions: {}, freshPartitions: {}, subscribedOne: {}",
-        assignedTask, pendingPartition, freshPartitions, subscribedPartitions);
+    LOG.info("assignment info, task: {}, suggested assignment: {}, subscribedOne: {}", currentAssignment,
+        suggestAssignment, subscribedPartitions);
 
-    List<String> previousSubscribedPartitions = new ArrayList<>();
-    //Step 1: revoke the partitions which is removed from subscribed partition
-    assignedTask.stream().forEach(t -> {
-      List<String> toRemovedPartition = t.getPartitionsV2().stream().filter(p -> !subscribedPartitions.contains(p)).collect(
-          Collectors.toList());
-      if (!toRemovedPartition.isEmpty()) {
-        t.revokePartitions(toRemovedPartition);
-        LOG.info("Partitions {} is removed as it was no longer subscribed", toRemovedPartition);
+    Map<String, Set<DatastreamTask>> newAssignment = assignSubscribedPartitions(dg, currentAssignment, subscribedPartitions);
+
+    Set<String> toReassignPartitions = new HashSet<>();
+    suggestAssignment.values().stream().forEach(toReassignPartitions::addAll);
+    toReassignPartitions.retainAll(subscribedPartitions);
+
+    //construct a map for partition movement, key: partition name, value: source task name
+    Map<String, String> partitionMovementSourceMap = new HashMap<>();
+
+    //Release a partition into the map
+    newAssignment.keySet().stream().forEach(instance -> {
+      Set<DatastreamTask> prevTasks = currentAssignment.get(instance);
+      Set<DatastreamTask> newTasks = prevTasks.stream().map(task -> {
+        if (!dg.belongsTo(task)) {
+          return task;
+        }
+        Set<String> movedPartitions = new HashSet<>(task.getPartitionsV2());
+        movedPartitions.retainAll(toReassignPartitions);
+        if (!movedPartitions.isEmpty()) {
+          movedPartitions.stream().forEach(p -> partitionMovementSourceMap.put(p, task.getDatastreamTaskName()));
+          List<String> partitions = new ArrayList<>(task.getPartitionsV2());
+          partitions.removeAll(movedPartitions);
+          return new DatastreamTaskImpl((DatastreamTaskImpl)task, partitions);
+        } else {
+          return task;
+        }
+      }).filter(t -> t!= null).collect(Collectors.toSet());
+      newAssignment.put(instance, newTasks);
+    });
+
+    //Assign the movement Info
+    suggestAssignment.forEach((inst, partitions) -> {
+      Set<String> confirmedPartitions = partitions.stream().filter(partitionMovementSourceMap::containsKey)
+          .collect(Collectors.toSet());
+
+      //find a task with small number of partitions on that instance
+      Set<DatastreamTask> dgTasks = newAssignment.get(inst).stream().filter(dg::belongsTo)
+          .collect(Collectors.toSet());
+      Optional<DatastreamTask> toAssignTask = dgTasks.stream().reduce((task1, task2) ->
+          task1.getPartitionsV2().size() < task2.getPartitionsV2().size() ? task1 : task2);
+
+      DatastreamTaskImpl newTask;
+
+      if (toAssignTask.isPresent()) {
+        DatastreamTask task = toAssignTask.get();
+        newAssignment.get(inst).remove(task);
+
+        List<String> newPartitions = new ArrayList<>(task.getPartitionsV2());
+        newPartitions.addAll(confirmedPartitions);
+        newTask = new DatastreamTaskImpl((DatastreamTaskImpl)task, partitions);
+      } else {
+        throw new DatastreamRuntimeException("No task is allocated in instance " + inst);
       }
-      previousSubscribedPartitions.addAll(t.getPartitionsV2());
+
+      confirmedPartitions.stream().forEach(p -> newTask.addPreviousTask(partitionMovementSourceMap.get(p)));
+      newAssignment.get(inst).add(newTask);
     });
 
 
-    // Step2: drop the pending partitions that which is no longer subscribed from to Assigned partitions
-    List<String> toAssignPendingPartitions = new ArrayList<>(pendingPartition.stream()
-        .filter(p -> subscribedPartitions.contains(p)).collect(Collectors.toList()));
-
-
-    // Step 3: Calculated the fresh partitions, we cannot directly get fresh partitions from subscribedPartitions
-    // as it will have a race condition that the partition is free from the task but has't been put into partition pool
-    // The fresh partition must been get from subscriptions
-    List<String> toAssignFreshPartitions = new ArrayList<>(freshPartitions);
-    toAssignFreshPartitions.removeAll(toAssignPendingPartitions);
-    toAssignFreshPartitions.removeAll(previousSubscribedPartitions);
-
-    // Step 4: assign the fresh and pending partitions from partition pool
-    Collections.shuffle(toAssignPendingPartitions);
-    Collections.shuffle(toAssignFreshPartitions);
-
-    int size = toAssignFreshPartitions.size() + toAssignPendingPartitions.size() + previousSubscribedPartitions.size();
-
-    int maxPartitionPerTask = (int) Math.ceil((double) size / (double) assignedTask.size());
-
-    int i = 0;
-    while (toAssignPendingPartitions.size() > 0) {
-      DatastreamTask task = assignedTask.get(i % assignedTask.size());
-
-      if (task.getPartitionsV2().size() < maxPartitionPerTask) {
-        task.assignPartitions(Collections.singletonList(toAssignPendingPartitions.remove(toAssignPendingPartitions.size() - 1)), false);
-      }
-      ++i;
-    }
-
-    while (toAssignFreshPartitions.size() > 0) {
-      DatastreamTask task = assignedTask.get(i % assignedTask.size());
-      if (task.getPartitionsV2().size() < maxPartitionPerTask) {
-        task.assignPartitions(Collections.singletonList(toAssignFreshPartitions.remove(toAssignFreshPartitions.size() - 1)), true);
-      }
-      ++i;
-    }
-
-
-    //Step 4: revoke heavily imbalanced task, put into partition pool
-    List<String> toMovePartitions = new ArrayList<>();
-
-    // TODO: add to move partition into Zookeeper
-    assignedTask.stream().forEach(task -> {
-      while (task.getPartitionsV2().size() > maxPartitionPerTask + MAX_ALLOW_INBALANCE_THRESHOLD) {
-        String toMovePartition = task.getPartitionsV2().get(task.getPartitionsV2().size() - 1);
-        task.revokePartitions(Collections.singletonList(toMovePartition));
-        toMovePartitions.add(toMovePartition);
-      }
-    });
-
-
-    if (toMovePartitions.size() > 0) {
-      LOG.info("To move partitions {}", toMovePartitions);
-    }
-
-    LOG.info("Assignment info {}", assignedTask);
-   // sanityChecks(assignedTask, toMovePartitions, subscribedPartitions);
+    LOG.info("assignment info, task: {}", newAssignment);
+    return newAssignment;
   }
 
   private void sanityChecks(List<DatastreamTask> assignedTask, List<String> toMovePartitions, List<String> allPartitions) {

@@ -928,6 +928,29 @@ public class ZkAdapter {
     }
   }
 
+  public boolean checkIfTaskAcquire(String connectorType, String taskName) {
+    String lockPath = KeyBuilder.datastreamTaskLock(_cluster, connectorType, taskName);
+    return (_zkclient.exists(lockPath));
+  }
+  /**
+   * @param task
+   * @param timeout
+   */
+  public void waitForPrevTasksToBeReleased(DatastreamTaskImpl task, Duration timeout) {
+    task.getPreviousTaskNames().stream().forEach(previousTask -> {
+        String lockPath = KeyBuilder.datastreamTaskLock(_cluster, task.getConnectorType(), previousTask);
+      if (_zkclient.exists(lockPath)) {
+        String owner = _zkclient.ensureReadData(lockPath);
+        if (owner.equals(_instanceName)) {
+          LOG.info("{} already owns the lock on {}", _instanceName, task);
+          _zkclient.delete(lockPath);
+          LOG.info("{} successfully released the lock on {}", _instanceName, task);
+        }
+        waitForTaskRelease(task, timeout.toMillis(), lockPath);
+      }
+    });
+  }
+
   /**
    * Release the datastream task lock previously acquired
    * @param task Datastream task to release exclusive access for
@@ -1185,73 +1208,6 @@ public class ZkAdapter {
     public void handleDataDeleted(String dataPath) throws Exception {
       // do nothing
     }
-  }
-
-  /**
-   * This is a blocking queue implementations
-   */
-  public void addPendingPartitions(String taskPrefix, List<String> partitions) {
-    _zkclient.ensurePath(KeyBuilder.instance(_cluster, _instanceName));
-    _zkclient.ensurePath(KeyBuilder.getPendingPartitionsForDatastream(_cluster, taskPrefix));
-    //TODO not use ephemeral node
-
-    partitions.stream().forEach(p -> {
-          String path = KeyBuilder.pendingPartitions(_cluster, taskPrefix, p);
-          if (!_zkclient.exists(path)) {
-            _zkclient.createEphemeral(path, _instanceName);
-          }
-        }
-    );
-    LOG.info("add pending partitions to zk {}", partitions);
-  }
-
-  public void deletePendingPartitions(String taskPrefix, List<String> partitionNames) {
-    try {
-      partitionNames.forEach(name -> _zkclient.delete(KeyBuilder.pendingPartitions(_cluster, taskPrefix, name)));
-    } catch (Exception ex) {
-      LOG.info("ERROR in deleting pending partitions", ex);
-    }
-  }
-
-  public List<String> getPendingPartitions(String taskPrefix) {
-    //apply lock
-    String path = KeyBuilder.getPendingPartitionsForDatastream(_cluster, taskPrefix);
-    if (_zkclient.exists(path)) {
-      List<String> toAssignPartitions = new ArrayList<>();
-      _zkclient.getChildren(path).stream().forEach(p -> {
-        toAssignPartitions.add(p);
-        //_zkclient.delete(KeyBuilder.pendingPartitions(_cluster, taskPrefix, p));
-      });
-      LOG.info("retrieve pending partitions from zk {}", toAssignPartitions);
-      return toAssignPartitions;
-    }
-    return Collections.emptyList();
-  }
-
-  /*
-   *
-   */
-  public boolean checkNonEmptyPendingPartitions() {
-    //apply lock
-    //TODO NPE check for zkclient
-    if (_zkclient == null) {
-      LOG.info("Waiting for Zk client to be started");
-      return false;
-    }
-    String path = KeyBuilder.getAllPendingPartitions(_cluster);
-    if (_zkclient.exists(path)) {
-      List<String> datastreamName = _zkclient.getChildren(path);
-      for (String name : datastreamName) {
-        String pendingPartitionsPath = KeyBuilder.getPendingPartitionsForDatastream(_cluster, name);
-        if (_zkclient.exists(pendingPartitionsPath)) {
-          List<String> partitions = _zkclient.getChildren(pendingPartitionsPath);
-          if (partitions.size() > 0) {
-            return true;
-          }
-        }
-      }
-    }
-    return false;
   }
 
 }

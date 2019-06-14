@@ -137,16 +137,4 @@ public interface DatastreamTask {
    * This is a no-op if the task is not assigned to the current instance.
    */
   void release();
-
-  /**
-   * doc
-   */
-  void revokePartitions(List<String> partitions);
-
-  /**
-   *
-   * @param partitions
-   */
-  void assignPartitions(List<String> partitions, boolean isFreshPartition);
-
 }

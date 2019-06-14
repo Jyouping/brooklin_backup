@@ -8,6 +8,7 @@ package com.linkedin.datastream.server;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -74,8 +75,9 @@ public class DatastreamTaskImpl implements DatastreamTask {
   private List<Integer> _partitions;
   private List<String> _partitionsV2;
 
+  private List<String> _previousTaskNames;
+
   // Status to indicate if instance has hooked up and process this object
-  private boolean _isLocked;
   private ZkAdapter _zkAdapter;
 
   private Map<String, String> _properties = new HashMap<>();
@@ -93,6 +95,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
     _id = UUID.randomUUID().toString();
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>();
+    _previousTaskNames = new ArrayList<>();
   }
 
   /**
@@ -102,6 +105,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public DatastreamTaskImpl(List<Datastream> datastreams) {
     this(datastreams, UUID.randomUUID().toString(), new ArrayList<>());
   }
+
 
   /**
    * Constructor for DatastreamTaskImpl.
@@ -136,8 +140,28 @@ public class DatastreamTaskImpl implements DatastreamTask {
       }
     }
     LOG.info("Created new DatastreamTask " + this);
+    _previousTaskNames = new ArrayList<>();
   }
 
+
+  /**
+   * Constructor for DatastreamTaskImpl.
+   * @param datastreams Datastreams associated with the task.
+   * @param id Task ID
+   * @param partitionsV2
+   * @param previousTaskNames
+   */
+  public DatastreamTaskImpl(DatastreamTaskImpl oldTask, Collection<String> partitionsV2) {
+    this(oldTask.getDatastreams());
+
+    _partitions = new ArrayList<>();
+    _partitionsV2 = new ArrayList<>(partitionsV2);
+    _zkAdapter = oldTask._zkAdapter;
+
+    _previousTaskNames = new ArrayList<>();
+    _previousTaskNames.add(oldTask.getDatastreamTaskName());
+    _previousTaskNames.addAll(oldTask._previousTaskNames);
+  }
 
     /**
      * Get the prefix of the task names that will be created for this datastream.
@@ -252,8 +276,11 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   @Override
   public void acquire(Duration timeout) {
-    _isLocked = true;
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
+    if (!_previousTaskNames.isEmpty()) {
+      _zkAdapter.waitForPrevTasksToBeReleased(this, timeout);
+      _previousTaskNames.clear();
+    }
     try {
       _zkAdapter.acquireTask(this, timeout);
     } catch (Exception e) {
@@ -267,7 +294,6 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public void release() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     _zkAdapter.releaseTask(this);
-    _isLocked = false;
   }
 
   @JsonIgnore
@@ -395,19 +421,15 @@ public class DatastreamTaskImpl implements DatastreamTask {
     _checkpoints.put(partition, checkpoint);
   }
 
-  @Override
-  public void revokePartitions(List<String> partitions) {
-    if (_isLocked) {
-      _zkAdapter.addPendingPartitions(_taskPrefix, partitions);
-    }
-    _partitionsV2.removeAll(partitions);
+
+  public List<String> getPreviousTaskNames() {
+    return _previousTaskNames;
   }
 
-  @Override
-  public void assignPartitions(List<String> partitions, boolean isFreshPartition) {
-    if (!isFreshPartition) {
-      _zkAdapter.deletePendingPartitions(_taskPrefix, partitions);
+  public void addPreviousTask(String taskName) {
+    if (_zkAdapter.checkIfTaskAcquire(_connectorType, taskName)) {
+      _previousTaskNames.add(taskName);
     }
-    _partitionsV2.addAll(partitions);
   }
+
 }

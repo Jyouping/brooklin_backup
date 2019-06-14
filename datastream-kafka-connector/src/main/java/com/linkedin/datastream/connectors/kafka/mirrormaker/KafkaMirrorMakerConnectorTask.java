@@ -339,33 +339,6 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
     } else {
       super.maybeCommitOffsetsInternal(consumer, hardCommit);
     }
-
-    //Periodically, update the assignment if necessary, we dont do it for hard commit as hard commit only happens
-    //when we are about to shut down the task
-    if (_useBrooklinForPartitionAssignment && !hardCommit) {
-      //TODO avoid hard commit recurrsion? and better cache
-      Set<TopicPartition> newTopicPartition  = getAssignedTopicPartitionFromTask();
-      if (!newTopicPartition.equals(_consumerAssignment)) {
-        LOG.info("new topic partitions {}, old partitions {}", newTopicPartition, _consumerAssignment);
-        //_logger.info("Try to assignment changed, assigned with new partitions: {}", newTopicPartition);
-        Set<TopicPartition> partitionToRevoke = new HashSet<>(_consumerAssignment);
-        // TODO: review the logic here, whats the input for partitions to be revoked
-        partitionToRevoke.removeAll(newTopicPartition);
-        if (!partitionToRevoke.isEmpty()) {
-          _logger.info("Partition to revoke", partitionToRevoke);
-
-          // Remove old position data
-          this.onPartitionsRevoked(partitionToRevoke);
-          _consumer.assign(_consumerAssignment);
-          _datastreamTask.revokePartitions(partitionToRevoke.stream()
-              .map(TopicPartition::toString).collect(Collectors.toList()));
-        }
-
-          this.onPartitionsAssigned(newTopicPartition);
-          _consumer.assign(_consumerAssignment);
-          _logger.info("Brooklin controlled assignment completed, task {}, partitions {}", _datastreamTask.getDatastreamTaskName(), _consumerAssignment);
-      }
-    }
   }
 
   @Override

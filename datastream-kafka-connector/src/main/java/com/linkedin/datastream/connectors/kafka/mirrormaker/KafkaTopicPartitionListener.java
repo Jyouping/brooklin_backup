@@ -84,12 +84,6 @@ public class KafkaTopicPartitionListener implements PartitionListener {
 
 
   @Override
-  public List<String> popFreshPartitions(String datastreamGroupName) {
-    List<String> freshPartitions = new ArrayList<>();
-    _partitionDiscoveryThreadMap.get(datastreamGroupName)._freshPartitions.drainTo(freshPartitions);
-    return Collections.unmodifiableList(freshPartitions);
-  }
-  @Override
   public void unregister(String datastreamGroupName) {
     _log.info("attempted to unregister datastream group {}", datastreamGroupName);
 

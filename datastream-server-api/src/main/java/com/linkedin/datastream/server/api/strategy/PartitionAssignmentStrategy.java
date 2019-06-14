@@ -5,8 +5,12 @@
  */
 package com.linkedin.datastream.server.api.strategy;
 
+import com.linkedin.datastream.common.Datastream;
+import com.linkedin.datastream.server.DatastreamGroup;
 import com.linkedin.datastream.server.DatastreamTask;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 
 /**
@@ -17,6 +21,6 @@ public interface PartitionAssignmentStrategy {
   /**
    * doc
    */
-  void assign(List<DatastreamTask> assignedTask, List<String> pendingPartition, List<String> freshPartitions,
-      List<String> subscribedPartitions);
+  Map<String, Set<DatastreamTask>> assign(DatastreamGroup datastreamGroup, Map<String, Set<DatastreamTask>> currentAssignment,
+      Map<String, Set<String>> suggestAssignment, List<String> subscribedPartitions);
 }

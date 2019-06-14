@@ -24,10 +24,6 @@ public interface PartitionListener {
    */
   List<String> getSubscribedPartitions(String datastreamGroupName);
 
-  /**
-   * doc
-   */
-  List<String> popFreshPartitions(String datastreamGroupName);
 
 
 
