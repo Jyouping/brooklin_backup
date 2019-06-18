@@ -142,7 +142,7 @@ public class KafkaTransportProviderAdmin implements TransportProviderAdmin {
           new KafkaTransportProvider(task, producers, transportProviderProperties, _transportProviderMetricsNamesPrefix));
       producers.forEach(p -> p.assignTask(task));
     } else {
-      LOG.warn("Trying to assign transport provider to task {} which is already assigned.", task);
+      LOG.warn("Trying to movePartitions transport provider to task {} which is already assigned.", task);
     }
 
     return _transportProviders.get(task);

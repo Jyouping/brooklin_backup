@@ -16,6 +16,7 @@ public class CoordinatorEvent {
   public enum EventType {
     LEADER_DO_ASSIGNMENT,
     LEADER_PARTITION_ASSIGNMENT,
+    LEADER_PARTITION_MOVEMENT,
     HANDLE_ASSIGNMENT_CHANGE,
     HANDLE_DATASTREAM_CHANGE_WITH_UPDATE,
     HANDLE_ADD_OR_DELETE_DATASTREAM,
@@ -27,6 +28,8 @@ public class CoordinatorEvent {
       new CoordinatorEvent(EventType.LEADER_DO_ASSIGNMENT);
   public static final CoordinatorEvent LEADER_PARTITION_ASSIGNMENT_EVENT =
       new CoordinatorEvent(EventType.LEADER_PARTITION_ASSIGNMENT);
+  public static final CoordinatorEvent LEADER_PARTITION_MOVEMENT_EVENT =
+      new CoordinatorEvent(EventType.LEADER_PARTITION_MOVEMENT);
   public static final CoordinatorEvent HANDLE_ASSIGNMENT_CHANGE_EVENT =
       new CoordinatorEvent(EventType.HANDLE_ASSIGNMENT_CHANGE);
   public static final CoordinatorEvent HANDLE_DATASTREAM_CHANGE_WITH_UPDATE_EVENT =

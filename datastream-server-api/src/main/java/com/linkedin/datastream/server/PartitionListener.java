@@ -15,7 +15,7 @@ import java.util.function.BiConsumer;
 public interface PartitionListener {
 
   /**
-   * doc
+   * st
    */
   void start(BiConsumer<String, List<String>> changeCallback);
 

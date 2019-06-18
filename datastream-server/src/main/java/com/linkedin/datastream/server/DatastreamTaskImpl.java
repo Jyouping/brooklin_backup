@@ -160,7 +160,9 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
     _previousTaskNames = new ArrayList<>();
     _previousTaskNames.add(oldTask.getDatastreamTaskName());
-    _previousTaskNames.addAll(oldTask._previousTaskNames);
+    if (!oldTask.isAcquired()) {
+      _previousTaskNames.addAll(oldTask._previousTaskNames);
+    }
   }
 
     /**
@@ -290,6 +292,11 @@ public class DatastreamTaskImpl implements DatastreamTask {
     }
   }
 
+  public boolean isAcquired() {
+    Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
+    return _zkAdapter.checkIfTaskAcquire(_connectorType, getDatastreamTaskName());
+  }
+
   @Override
   public void release() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
@@ -403,8 +410,8 @@ public class DatastreamTaskImpl implements DatastreamTask {
   @Override
   public String toString() {
     // toString() is mainly for logging purpose, feel free to modify the content/format
-    return String.format("%s(%s), partitionsV2=%s, partitions=%s", getDatastreamTaskName(), _connectorType,
-        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions));
+    return String.format("%s(%s), partitionsV2=%s, partitions=%s, dependencies=%s", getDatastreamTaskName(), _connectorType,
+        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions), _previousTaskNames);
   }
 
   public void setZkAdapter(ZkAdapter adapter) {
@@ -427,9 +434,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   }
 
   public void addPreviousTask(String taskName) {
-    if (_zkAdapter.checkIfTaskAcquire(_connectorType, taskName)) {
-      _previousTaskNames.add(taskName);
-    }
+    _previousTaskNames.add(taskName);
   }
 
 }

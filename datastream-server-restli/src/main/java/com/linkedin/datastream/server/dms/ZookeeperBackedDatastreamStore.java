@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server.dms;
 
+import com.linkedin.datastream.server.SuggestedAssignment;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -112,6 +113,24 @@ public class ZookeeperBackedDatastreamStore implements DatastreamStore {
     String json = DatastreamUtils.toJSON(datastream);
     _zkClient.writeData(path, json);
   }
+
+  @Override
+  public void updateDatastreamPartitions(String key, Datastream datastream, SuggestedAssignment suggestedAssignment)
+  {
+    Validate.notNull(datastream, "null datastream");
+    Validate.notNull(key, "null key for datastream" + datastream);
+
+    long current = System.currentTimeMillis();
+    String datastreamGroupName  = DatastreamUtils.getTaskPrefix(datastream);
+    String path = KeyBuilder.getSuggestedAssignment(_cluster, datastreamGroupName);
+    _zkClient.ensurePath(path);
+    if (_zkClient.exists(path)){
+      String json = suggestedAssignment.toJson();
+      _zkClient.ensurePath(path + '/' + current);
+      _zkClient.writeData(path + '/' + current, json);
+    }
+  }
+
 
   @Override
   public void deleteDatastream(String key) {

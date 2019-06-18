@@ -5,9 +5,11 @@
  */
 package com.linkedin.datastream.server.dms;
 
+import com.linkedin.datastream.server.SuggestedAssignment;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -316,6 +318,42 @@ public class DatastreamResources extends CollectionResourceTemplate<String, Data
     }
 
     LOG.info("Completed request for pausing datastream {}", datastream);
+
+    return new ActionResult<>(HttpStatus.S_200_OK);
+  }
+
+  /**
+   * move partitions
+   */
+  @Action(name = "movePartitions", resourceLevel = ResourceLevel.ENTITY)
+  public ActionResult<Void> movePartitions(@PathKeysParam PathKeys pathKeys,
+      @ActionParam("partitions") String partitions, @ActionParam("host") String host) {
+    String datastreamName = pathKeys.getAsString(KEY_NAME);
+    Datastream datastream = _store.getDatastream(datastreamName);
+
+    LOG.info("Received request to move datastream {}", datastream);
+
+    if (datastream == null) {
+      _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_404_NOT_FOUND,
+          "Datastream to pause does not exist: " + datastreamName);
+    }
+
+    if (!DatastreamStatus.READY.equals(datastream.getStatus())) {
+      _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_405_METHOD_NOT_ALLOWED,
+          "Can only move partitions in a READY state: " + datastreamName);
+    }
+
+    //To be implemented
+    List<String> targetPartitions = Arrays.asList(partitions.split(","));
+    SuggestedAssignment suggestedAssignment = new SuggestedAssignment(targetPartitions, host);
+    try {
+      _store.updateDatastreamPartitions(datastream.getName(), datastream, suggestedAssignment);
+    } catch (Exception ex) {
+      LOG.error("Error to move partitions", ex);
+      _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_500_INTERNAL_SERVER_ERROR,
+          "ERROR");
+    }
+    LOG.info("Completed request for moving datastream {}", datastream);
 
     return new ActionResult<>(HttpStatus.S_200_OK);
   }

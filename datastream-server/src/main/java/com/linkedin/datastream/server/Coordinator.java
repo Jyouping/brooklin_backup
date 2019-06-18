@@ -176,6 +176,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   private final Map<String, TransportProviderAdmin> _transportProviderAdmins = new HashMap<>();
   private final CoordinatorEventBlockingQueue _eventQueue;
   private final CoordinatorEventProcessor _eventThread;
+  private final Thread _testMovementThread;
 
   private final ThreadPoolExecutor _assignmentChangeThreadPool;
   private final String _clusterName;
@@ -236,6 +237,20 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _eventThread = new CoordinatorEventProcessor();
     _eventThread.setDaemon(true);
 
+    _testMovementThread = new Thread() {
+      @Override
+      public void run() {
+        while (!isInterrupted()) {
+          try {
+            Thread.sleep(20000);
+          } catch (InterruptedException ex) {
+
+          }
+          _eventQueue.put(CoordinatorEvent.LEADER_PARTITION_MOVEMENT_EVENT);
+        }
+      }
+    };
+
     _dynamicMetricsManager = DynamicMetricsManager.getInstance();
     _dynamicMetricsManager.registerGauge(MODULE, NUM_PAUSED_DATASTREAMS_GROUPS, () -> _pausedDatastreamsGroups.get());
     _dynamicMetricsManager.registerGauge(MODULE, IS_LEADER, () -> getIsLeader().getAsBoolean() ? 1 : 0);
@@ -261,6 +276,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _log.info("Starting coordinator");
     _eventThread.start();
     _adapter.connect();
+    _testMovementThread.start();
+
 
     for (String connectorType : _connectors.keySet()) {
       ConnectorInfo connectorInfo = _connectors.get(connectorType);
@@ -304,6 +321,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       }
     }
 
+    _testMovementThread.interrupt();
+
     // Stopping all the connectors so that they stop producing.
     for (String connectorType : _connectors.keySet()) {
       try {
@@ -319,7 +338,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     for (DatastreamTask task : _assignedDatastreamTasks.values()) {
       ((EventProducer) task.getEventProducer()).shutdown();
     }
-
     _adapter.disconnect();
     _log.info("Coordinator stopped");
   }
@@ -679,6 +697,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           performPartitionAssignment();
           break;
 
+        case LEADER_PARTITION_MOVEMENT:
+          performPartitionMovement();
+          break;
+
         default:
           String errorMessage = String.format("Unknown event type %s.", event.getType());
           ErrorLogger.logAndThrowDatastreamRuntimeException(_log, errorMessage, null);
@@ -978,7 +1000,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           for (String dgName : datastreamGroupNames) {
             List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName);
             //compute the assignement for each datastremGroup
-            assignmentByInstance = partitionAssignmentStrategy.assign(dgMap.get(dgName), assignmentByInstance, new HashMap<>(), subscribedPartitions);
+            assignmentByInstance = partitionAssignmentStrategy.assignSubscribedPartitions(dgMap.get(dgName), assignmentByInstance, subscribedPartitions);
           }
         }
       }
@@ -993,7 +1015,50 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       _adapter.updateAllAssignments(finalAssignment);
 
       //Notify datastream update
-      _adapter.touchAllInstanceAssignments();
+//      _adapter.touchAllInstanceAssignments();
+    } catch (Exception ex) {
+      _log.info("Partition assigned failed, Exception: ", ex);
+    }
+  }
+
+  private void performPartitionMovement() {
+    try {
+      Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+
+      List<DatastreamTask> datastreamTasks = new ArrayList<>();
+      assignmentByInstance.values().stream().forEach(s -> datastreamTasks.addAll(s));
+      List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
+
+      Map<String, DatastreamGroup> dgMap = datastreamGroups.stream().collect(Collectors.toMap(k -> k.getTaskPrefix(), v -> v));
+      PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
+
+      for (String connectorType : _connectors.keySet()) {
+        PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
+        if (partitionListener != null) {
+          List<String> datastreamGroupNames = partitionListener.getRegisteredDatastreamGroups();
+          for (String dgName : datastreamGroupNames) {
+            List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName);
+            Map<String, Set<String>> suggestedAssignment = _adapter.getSuggestedAssignment(dgName);
+            if (!suggestedAssignment.values().isEmpty()) {
+               assignmentByInstance = partitionAssignmentStrategy.movePartitions(dgMap.get(dgName), assignmentByInstance,
+                  suggestedAssignment, subscribedPartitions);
+            }
+            _adapter.cleanUpSuggestedAssignment(dgName);
+          }
+        }
+      }
+
+      _log.info("Partition movement completed: datastreamGroup, assignment {} ", assignmentByInstance);
+      Map<String, List<DatastreamTask>> finalAssignment = new HashMap<>();
+      for (String key : assignmentByInstance.keySet()) {
+        finalAssignment.put(key, new ArrayList<>(assignmentByInstance.get(key)));
+      }
+
+
+      _adapter.updateAllAssignments(finalAssignment);
+
+      //Notify datastream update
+//      _adapter.touchAllInstanceAssignments();
     } catch (Exception ex) {
       _log.info("Partition assigned failed, Exception: ", ex);
     }
@@ -1054,7 +1119,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           .collect(Collectors.toList());
 
       // Get the list of tasks per instance for the given connector type
-      // We need to call assign even if the number of datastreams are empty, This is to make sure that
+      // We need to call movePartitions even if the number of datastreams are empty, This is to make sure that
       // the assignments get cleaned up for the deleted datastreams.
       Map<String, Set<DatastreamTask>> tasksByConnectorAndInstance =
           strategy.assign(datastreamsPerConnectorType, liveInstances, previousAssignmentByInstance);
@@ -1378,9 +1443,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   /**
-   * Add a transport provider that the coordinator can assign to datastreams it creates.
+   * Add a transport provider that the coordinator can movePartitions to datastreams it creates.
    * @param transportProviderName Name of transport provider.
-   * @param admin Instance of TransportProviderAdmin that the coordinator can assign.
+   * @param admin Instance of TransportProviderAdmin that the coordinator can movePartitions.
    */
   public void addTransportProvider(String transportProviderName, TransportProviderAdmin admin) {
     _transportProviderAdmins.put(transportProviderName, admin);
@@ -1390,9 +1455,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   /**
-   * Add a Serde that the coordinator can assign to datastreams it creates.
+   * Add a Serde that the coordinator can movePartitions to datastreams it creates.
    * @param serdeName Name of Serde.
-   * @param admin Instance of SerdeAdmin that the coordinator can assign.
+   * @param admin Instance of SerdeAdmin that the coordinator can movePartitions.
    */
   public void addSerde(String serdeName, SerdeAdmin admin) {
     _serdeAdmins.put(serdeName, admin);

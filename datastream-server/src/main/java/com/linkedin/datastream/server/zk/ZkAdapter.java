@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server.zk;
 
+import com.linkedin.datastream.server.SuggestedAssignment;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -926,6 +927,45 @@ public class ZkAdapter {
           timeout.toMillis(), owner);
       ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, msg, null);
     }
+  }
+
+  public void cleanUpSuggestedAssignment(String datastreamGroupName) {
+    String path = KeyBuilder.getSuggestedAssignment(_cluster, datastreamGroupName);
+    if (_zkclient.exists(path)) {
+      _zkclient.deleteRecursive(path);
+    }
+  }
+
+  public Map<String, Set<String>> getSuggestedAssignment(String datastreamGroupName) {
+    Map<String, Set<String>> result = new HashMap<>();
+
+    String path = KeyBuilder.getSuggestedAssignment(_cluster, datastreamGroupName);
+    if (_zkclient.exists(path)) {
+      List<String> nodes = _zkclient.getChildren(path);
+      for (String node : nodes) {
+        String content = _zkclient.readData(path + '/' + node);
+        SuggestedAssignment assignment = SuggestedAssignment.fromJson(content);
+
+        //Compute the correct instance
+        Map<String, String> hostInstanceMap = new HashMap<>();
+        if (_liveInstancesProvider.getLiveInstances() != null ) {
+          _liveInstancesProvider.getLiveInstances().stream().forEach(instance -> {
+            try {
+              hostInstanceMap.put(instance.substring(0, instance.lastIndexOf('-')), instance);
+            } catch (Exception ex) {
+              LOG.info("Fail to parse instance name {}", instance, ex);
+            }
+          });
+        }
+        if (hostInstanceMap.containsKey(assignment.getTargetInstance()) && assignment.getPartitionNames() != null) {
+          LOG.info("Added assignment {} {}", assignment.getTargetInstance(), assignment.getPartitionNames());
+          result.put(hostInstanceMap.get(assignment.getTargetInstance()), new HashSet<>(assignment.getPartitionNames()));
+        } else {
+          LOG.warn("instance not found in the map");
+        }
+      }
+    }
+    return result;
   }
 
   public boolean checkIfTaskAcquire(String connectorType, String taskName) {

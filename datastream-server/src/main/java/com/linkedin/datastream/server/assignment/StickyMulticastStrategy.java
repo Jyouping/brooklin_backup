@@ -91,7 +91,7 @@ public class StickyMulticastStrategy implements AssignmentStrategy {
       Map<String, Set<DatastreamTask>> currentAssignment) {
 
     int totalAssignedTasks = currentAssignment.values().stream().mapToInt(Set::size).sum();
-    LOG.info("Begin assign {} datastreams to {} instances with {} tasks", datastreams.size(), instances.size(),
+    LOG.info("Begin movePartitions {} datastreams to {} instances with {} tasks", datastreams.size(), instances.size(),
         totalAssignedTasks);
 
     if (instances.isEmpty()) {

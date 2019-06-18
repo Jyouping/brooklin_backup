@@ -80,6 +80,9 @@ public final class KeyBuilder {
    */
   private static final String PENDING_PARTITIONS = DATASTREAM_WITH_PENDING_PARTITION + "/%s";
 
+  private static final String SUGGESTED_ASSIGNEMENT = CLUSTER + "/suggestedAssignment/%s";
+
+
 
   /**
    * Get the root level ZooKeeper znode of a Brooklin cluster
@@ -296,5 +299,15 @@ public final class KeyBuilder {
    */
   public static String getAllPendingPartitions(String cluster) {
     return String.format(ALL_PENDING_PARTITIONS, cluster).replaceAll("//", "/");
+  }
+
+  /**
+   *
+   * @param cluster
+   * @param datastreamGroupName
+   * @return
+   */
+  public static String getSuggestedAssignment(String cluster, String datastreamGroupName) {
+    return String.format(SUGGESTED_ASSIGNEMENT, cluster, datastreamGroupName).replaceAll("//", "/'");
   }
 }

@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server.dms;
 
+import com.linkedin.datastream.server.SuggestedAssignment;
 import java.util.stream.Stream;
 
 import com.linkedin.datastream.common.Datastream;
@@ -44,4 +45,7 @@ public interface DatastreamStore {
    * Deletes the datastream associated with the provided key.
    */
   void deleteDatastream(String key);
+
+  void updateDatastreamPartitions(String key, Datastream datastream, SuggestedAssignment suggestedAssignment) throws DatastreamException;
+
 }

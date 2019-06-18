@@ -124,6 +124,16 @@
       "entity" : {
         "path" : "/datastream/{datastreamId}",
         "actions" : [ {
+          "name" : "movePartitions",
+          "doc" : "move partitions",
+          "parameters" : [ {
+            "name" : "partitions",
+            "type" : "string"
+          }, {
+            "name" : "host",
+            "type" : "string"
+          } ]
+        }, {
           "name" : "pause",
           "doc" : "Pause a datastream\nService Returns: Result HTTP status",
           "parameters" : [ {

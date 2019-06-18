@@ -28,10 +28,10 @@ import org.slf4j.LoggerFactory;
 public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStrategy  {
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
 
-  private Map<String, Set<DatastreamTask>> assignSubscribedPartitions(DatastreamGroup dg, Map<String,
+  public Map<String, Set<DatastreamTask>> assignSubscribedPartitions(DatastreamGroup dg, Map<String,
       Set<DatastreamTask>> currentAssignment, List<String> subscribedPartitions) {
     //Assign
-    LOG.info("assignment info, task: {}, subscribedOne: {}", currentAssignment, subscribedPartitions);
+    LOG.info("partition assignment info, task: {}, subscribedOne: {}", currentAssignment, subscribedPartitions);
 
     List<String> assignedPartitions = new ArrayList<>();
     int totalTaskCount = 0;
@@ -83,15 +83,14 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
     return newAssignment;
   }
 
-  @Override
-  public Map<String, Set<DatastreamTask>> assign(DatastreamGroup dg,
+  public Map<String, Set<DatastreamTask>> movePartitions(DatastreamGroup dg,
       Map<String, Set<DatastreamTask>> currentAssignment,
       Map<String, Set<String>> suggestAssignment, List<String> subscribedPartitions) {
 
-    LOG.info("assignment info, task: {}, suggested assignment: {}, subscribedOne: {}", currentAssignment,
+    LOG.info("Try to move partition, task: {}, suggested assignment: {}, subscribedOne: {}", currentAssignment,
         suggestAssignment, subscribedPartitions);
 
-    Map<String, Set<DatastreamTask>> newAssignment = assignSubscribedPartitions(dg, currentAssignment, subscribedPartitions);
+    Map<String, Set<DatastreamTask>> newAssignment = new HashMap<>(currentAssignment);
 
     Set<String> toReassignPartitions = new HashSet<>();
     suggestAssignment.values().stream().forEach(toReassignPartitions::addAll);
@@ -120,6 +119,7 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
       }).filter(t -> t!= null).collect(Collectors.toSet());
       newAssignment.put(instance, newTasks);
     });
+    //TODO: check the broken parts
 
     //Assign the movement Info
     suggestAssignment.forEach((inst, partitions) -> {
@@ -127,24 +127,23 @@ public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStr
           .collect(Collectors.toSet());
 
       //find a task with small number of partitions on that instance
-      Set<DatastreamTask> dgTasks = newAssignment.get(inst).stream().filter(dg::belongsTo)
-          .collect(Collectors.toSet());
-      Optional<DatastreamTask> toAssignTask = dgTasks.stream().reduce((task1, task2) ->
-          task1.getPartitionsV2().size() < task2.getPartitionsV2().size() ? task1 : task2);
 
-      DatastreamTaskImpl newTask;
-
-      if (toAssignTask.isPresent()) {
-        DatastreamTask task = toAssignTask.get();
-        newAssignment.get(inst).remove(task);
-
-        List<String> newPartitions = new ArrayList<>(task.getPartitionsV2());
-        newPartitions.addAll(confirmedPartitions);
-        newTask = new DatastreamTaskImpl((DatastreamTaskImpl)task, partitions);
+      Optional<DatastreamTask> toAssignTask;
+      if (newAssignment.containsKey(inst)) {
+        Set<DatastreamTask> dgTasks = newAssignment.get(inst).stream().filter(dg::belongsTo)
+            .collect(Collectors.toSet());
+        toAssignTask = dgTasks.stream().reduce((task1, task2) ->
+            task1.getPartitionsV2().size() < task2.getPartitionsV2().size() ? task1 : task2);
       } else {
-        throw new DatastreamRuntimeException("No task is allocated in instance " + inst);
+        toAssignTask = Optional.empty();
       }
 
+      DatastreamTask task = toAssignTask.orElseThrow(() ->
+          new DatastreamRuntimeException("No task is allocated in instance " + inst));
+      newAssignment.get(inst).remove(task);
+      List<String> newPartitions = new ArrayList<>(task.getPartitionsV2());
+      newPartitions.addAll(confirmedPartitions);
+      DatastreamTaskImpl newTask = new DatastreamTaskImpl((DatastreamTaskImpl)task, newPartitions);
       confirmedPartitions.stream().forEach(p -> newTask.addPreviousTask(partitionMovementSourceMap.get(p)));
       newAssignment.get(inst).add(newTask);
     });
