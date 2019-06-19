@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server;
 
+import com.google.common.collect.ImmutableList;
 import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
 import com.linkedin.datastream.server.assignment.StickyPartitionAssignmentStrategy;
 import java.time.Duration;
@@ -204,6 +205,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
   // make sure the scheduled retries are not duplicated
   private final AtomicBoolean leaderDoAssignmentScheduled = new AtomicBoolean(false);
+
+  // make sure the scheduled retries are not duplicated
+  private final AtomicBoolean leaderPartitionAssignmentScheduled = new AtomicBoolean(false);
+
 
   private final Map<String, SerdeAdmin> _serdeAdmins = new HashMap<>();
   private final Map<String, Authorizer> _authorizers = new HashMap<>();
@@ -438,10 +443,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _log.info("START: Coordinator::handleAssignmentChange. Instance: " + _adapter.getInstanceName() + ", assignment: "
         + assignment + " isDatastreamUpdate: " + isDatastreamUpdate);
 
-    //TODO: any better approach to clear Only for partition update?
-    if (isDatastreamUpdate) {
-      _assignedDatastreamTasks.clear();
-    }
     // all datastream tasks for all connector types
     Map<String, List<DatastreamTask>> currentAssignment = new HashMap<>();
     assignment.forEach(ds -> {
@@ -683,7 +684,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           break;
 
         case LEADER_PARTITION_ASSIGNMENT:
-          performPartitionAssignment();
+          performPartitionAssignment(event._datastreamGroupName);
           break;
 
         case LEADER_PARTITION_MOVEMENT:
@@ -971,26 +972,30 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     }
   }
 
-  private void performPartitionAssignment() {
+  private void performPartitionAssignment(Optional<String> datastreamGroupName) {
+    boolean succeeded = false;
     try {
-      //TODO pass datastreamGroupName as argument
       Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
 
-      List<DatastreamTask> datastreamTasks = new ArrayList<>();
-      assignmentByInstance.values().stream().forEach(s -> datastreamTasks.addAll(s));
+      // retrieve the datastreamGroups for validation
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
+      Map<String, DatastreamGroup> dgMap = datastreamGroups.stream().collect(
+          Collectors.toMap(DatastreamGroup::getTaskPrefix, Function.identity()));
 
-      Map<String, DatastreamGroup> dgMap = datastreamGroups.stream().collect(Collectors.toMap(k -> k.getTaskPrefix(), v -> v));
       PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
 
       for (String connectorType : _connectors.keySet()) {
         PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
         if (partitionListener != null) {
           List<String> datastreamGroupNames = partitionListener.getRegisteredDatastreamGroups();
+
+          //if the datastreamGroupName is specified, we process for that datastream only
+          datastreamGroupName.ifPresent(dg -> datastreamGroupNames.retainAll(ImmutableList.of(dg)));
+
           for (String dgName : datastreamGroupNames) {
-            List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName).get();
-            //compute the assignement for each datastremGroup
-            assignmentByInstance = partitionAssignmentStrategy.assignSubscribedPartitions(dgMap.get(dgName), assignmentByInstance, subscribedPartitions);
+            List<String> subscribes = partitionListener.getSubscribedPartitions(dgName)
+                .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
+            assignmentByInstance = partitionAssignmentStrategy.assignSubscribedPartitions(dgMap.get(dgName), assignmentByInstance, subscribes);
           }
         }
       }
@@ -1001,25 +1006,30 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         finalAssignment.put(key, new ArrayList<>(assignmentByInstance.get(key)));
       }
 
-      //TODO: update the delta only
       _adapter.updateAllAssignments(finalAssignment);
 
-      //Notify datastream update
-//      _adapter.touchAllInstanceAssignments();
+      succeeded = true;
     } catch (Exception ex) {
-      _log.info("Partition assigned failed, Exception: ", ex);
+      _log.info("Partition assignment failed, Exception: ", ex);
+    }
+    // schedule retry if failure
+    if (!succeeded && !leaderPartitionAssignmentScheduled.get() && datastreamGroupName.isPresent()) {
+      _log.info("Schedule retry for leader assigning tasks");
+      _dynamicMetricsManager.createOrUpdateMeter(MODULE, "handleLeaderPartitionAssignment", NUM_RETRIES, 1);
+      leaderPartitionAssignmentScheduled.set(true);
+      _executor.schedule(() -> {
+        _eventQueue.put(CoordinatorEvent.createLeaderPartitionAssignmentEvent(datastreamGroupName.get()));
+        leaderPartitionAssignmentScheduled.set(false);
+      }, _config.getRetryIntervalMs(), TimeUnit.MILLISECONDS);
     }
   }
 
   private void performPartitionMovement() {
     try {
-      //TODO only query selected datastream group
-
       Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
 
-      List<DatastreamTask> datastreamTasks = new ArrayList<>();
-      assignmentByInstance.values().stream().forEach(s -> datastreamTasks.addAll(s));
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
+      List<String> toProcessDatastreams = _adapter.getDatastreamsWithTargetAssignment();
 
       Map<String, DatastreamGroup> dgMap = datastreamGroups.stream().collect(Collectors.toMap(k -> k.getTaskPrefix(), v -> v));
       PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
@@ -1027,14 +1037,17 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       for (String connectorType : _connectors.keySet()) {
         PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
         if (partitionListener != null) {
+
           List<String> datastreamGroupNames = partitionListener.getRegisteredDatastreamGroups();
+          //Processed datastream with assignment info only
+          datastreamGroupNames.retainAll(toProcessDatastreams);
+
           for (String dgName : datastreamGroupNames) {
-            List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName).get();
-            Map<String, Set<String>> suggestedAssignment = _adapter.getSuggestedAssignment(dgName);
-            if (!suggestedAssignment.values().isEmpty()) {
-               assignmentByInstance = partitionAssignmentStrategy.movePartitions(dgMap.get(dgName), assignmentByInstance,
-                  suggestedAssignment, subscribedPartitions);
-            }
+            List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName)
+                .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
+            Map<String, Set<String>> suggestedAssignment = _adapter.getTargetAssignment(dgName);
+             assignmentByInstance = partitionAssignmentStrategy.movePartitions(dgMap.get(dgName), assignmentByInstance,
+                suggestedAssignment, subscribedPartitions);
             _adapter.cleanUpSuggestedAssignment(dgName);
           }
         }
@@ -1048,11 +1061,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
 
       _adapter.updateAllAssignments(finalAssignment);
-
-      //Notify datastream update
-//      _adapter.touchAllInstanceAssignments();
     } catch (Exception ex) {
-      _log.info("Partition assigned failed, Exception: ", ex);
+      //We don't retry if there is any exceptions
+      _log.info("Partition movement failed, Exception: ", ex);
     }
   }
 
@@ -1507,10 +1518,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       while (!isInterrupted()) {
         try {
           CoordinatorEvent event = _eventQueue.take();
-          //Dedup the similar event in the eventQueue to avoid multiple trigger
-          while (!_eventQueue.isEmpty() && _eventQueue.peek().equals(event)) {
-            _eventQueue.take();
-          }
           if (event != null) {
             handleEvent(event);
           }

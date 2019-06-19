@@ -944,7 +944,15 @@ public class ZkAdapter {
     }
   }
 
-  public Map<String, Set<String>> getSuggestedAssignment(String datastreamGroupName) {
+  public List<String> getDatastreamsWithTargetAssignment() {
+    String path = KeyBuilder.getTargetAssignmentBase(_cluster);
+    if (_zkclient.exists(path)) {
+      return _zkclient.getChildren(path);
+    }
+    return Collections.emptyList();
+  }
+
+  public Map<String, Set<String>> getTargetAssignment(String datastreamGroupName) {
     Map<String, Set<String>> result = new HashMap<>();
 
     String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
