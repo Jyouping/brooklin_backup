@@ -8,15 +8,10 @@ package com.linkedin.datastream.connectors.kafka.mirrormaker;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingDeque;
-import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.apache.commons.collections.ListUtils;
@@ -52,7 +47,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
   private boolean _shutdown;
 
   private Map<String, PartitionDiscoveryThread> _partitionDiscoveryThreadMap = new HashMap<>();
-  private java.util.function.BiConsumer<String, List<String>>_discoveryCallback;
+  private java.util.function.Consumer<String> _discoveryCallback;
 
   /**
    * doc
@@ -65,10 +60,9 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     _shutdown = false;
   }
 
-  //TODO: how do you perform an update to a datastream
   @Override
-  public void start(BiConsumer<String, List<String>> changeCallback) {
-    _discoveryCallback = changeCallback;
+  public void start(java.util.function.Consumer<String> callback) {
+    _discoveryCallback = callback;
   }
 
   @Override
@@ -77,15 +71,21 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     _partitionDiscoveryThreadMap.values().forEach(Thread::interrupt);
   }
 
+  //TODO distinguished not ready vs emptylist
   @Override
-  public List<String> getSubscribedPartitions(String datastreamGroupName) {
-    return Collections.unmodifiableList(_partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions);
+  public Optional<List<String>> getSubscribedPartitions(String datastreamGroupName) {
+    if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
+      if (_partitionDiscoveryThreadMap.get(datastreamGroupName)._initialized) {
+        return Optional.of(Collections.unmodifiableList(_partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions));
+      }
+    }
+    return Optional.empty();
   }
 
 
   @Override
-  public void unregister(String datastreamGroupName) {
-    _log.info("attempted to unregister datastream group {}", datastreamGroupName);
+  public void deregister(String datastreamGroupName) {
+    _log.info("attempted to deregister datastream group {}", datastreamGroupName);
 
     Optional.ofNullable(_partitionDiscoveryThreadMap.remove(datastreamGroupName)).ifPresent(Thread::interrupt);
   }
@@ -131,14 +131,15 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     private Datastream _datastream;
     private String _datastreamGroupName;
     private List<String> _subscribedPartitions = new ArrayList<>();
-    private BlockingQueue<String> _freshPartitions = new LinkedBlockingDeque<>();
     private Pattern _topicPattern;
+    private boolean _initialized;
 
     public PartitionDiscoveryThread(String datastreamGroupName, Datastream datastream) {
       _datastream  = datastream;
       _datastreamGroupName = datastreamGroupName;
       _topicPattern = Pattern.compile(
           KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString()).getTopicName());
+      _initialized = false;
     }
 
     public void setDatastream(Datastream datastream) {
@@ -174,14 +175,10 @@ public class KafkaTopicPartitionListener implements PartitionListener {
           if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
             _log.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
                 , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
-            Set<String> addedPartitions = new HashSet<>(newPartitionInfo);
-            addedPartitions.removeAll(_subscribedPartitions);
+
             _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
-            for (String p : addedPartitions) {
-              _freshPartitions.put(p);
-            }
-            _discoveryCallback.accept(_datastreamGroupName,
-                Collections.synchronizedList(new ArrayList<String>(addedPartitions)));
+            _initialized = true;
+            _discoveryCallback.accept(_datastreamGroupName);
           }
           Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
         } catch (Throwable t) {

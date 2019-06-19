@@ -5,7 +5,7 @@
  */
 package com.linkedin.datastream.server.zk;
 
-import com.linkedin.datastream.server.SuggestedAssignment;
+import com.linkedin.datastream.server.TargetAssignment;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -127,6 +127,7 @@ public class ZkAdapter {
   // only the leader should maintain this list and listen to the changes of live instances
   private ZkBackedDMSDatastreamList _datastreamList = null;
   private ZkBackedLiveInstanceListProvider _liveInstancesProvider = null;
+  private ZkTargetAssignmentProvider _targetAssignmentProvider = null;
 
   // Cache all live DatastreamTasks per instance for assignment strategy
   private Map<String, Set<DatastreamTask>> _liveTaskMap = new HashMap<>();
@@ -220,6 +221,8 @@ public class ZkAdapter {
 
     _datastreamList = new ZkBackedDMSDatastreamList();
     _liveInstancesProvider = new ZkBackedLiveInstanceListProvider();
+    _targetAssignmentProvider = new ZkTargetAssignmentProvider();
+
 
     // Load all existing tasks when we just become the new leader. This is needed
     // for resuming working on the tasks from previous sessions.
@@ -243,6 +246,11 @@ public class ZkAdapter {
     if (_liveInstancesProvider != null) {
       _liveInstancesProvider.close();
       _liveInstancesProvider = null;
+    }
+
+    if (_targetAssignmentProvider != null) {
+      _targetAssignmentProvider.close();
+      _targetAssignmentProvider = null;
     }
 
     _isLeader = false;
@@ -930,7 +938,7 @@ public class ZkAdapter {
   }
 
   public void cleanUpSuggestedAssignment(String datastreamGroupName) {
-    String path = KeyBuilder.getSuggestedAssignment(_cluster, datastreamGroupName);
+    String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
     if (_zkclient.exists(path)) {
       _zkclient.deleteRecursive(path);
     }
@@ -939,12 +947,12 @@ public class ZkAdapter {
   public Map<String, Set<String>> getSuggestedAssignment(String datastreamGroupName) {
     Map<String, Set<String>> result = new HashMap<>();
 
-    String path = KeyBuilder.getSuggestedAssignment(_cluster, datastreamGroupName);
+    String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
     if (_zkclient.exists(path)) {
       List<String> nodes = _zkclient.getChildren(path);
       for (String node : nodes) {
         String content = _zkclient.readData(path + '/' + node);
-        SuggestedAssignment assignment = SuggestedAssignment.fromJson(content);
+        TargetAssignment assignment = TargetAssignment.fromJson(content);
 
         //Compute the correct instance
         Map<String, String> hostInstanceMap = new HashMap<>();
@@ -957,9 +965,9 @@ public class ZkAdapter {
             }
           });
         }
-        if (hostInstanceMap.containsKey(assignment.getTargetInstance()) && assignment.getPartitionNames() != null) {
-          LOG.info("Added assignment {} {}", assignment.getTargetInstance(), assignment.getPartitionNames());
-          result.put(hostInstanceMap.get(assignment.getTargetInstance()), new HashSet<>(assignment.getPartitionNames()));
+        if (hostInstanceMap.containsKey(assignment.getTargetHost()) && assignment.getPartitionNames() != null) {
+          LOG.info("Added assignment {} {}", assignment.getTargetHost(), assignment.getPartitionNames());
+          result.put(hostInstanceMap.get(assignment.getTargetHost()), new HashSet<>(assignment.getPartitionNames()));
         } else {
           LOG.warn("instance not found in the map");
         }
@@ -977,7 +985,7 @@ public class ZkAdapter {
    * @param timeout
    */
   public void waitForPrevTasksToBeReleased(DatastreamTaskImpl task, Duration timeout) {
-    task.getPreviousTaskNames().stream().forEach(previousTask -> {
+    task.getDependentTasks().stream().forEach(previousTask -> {
         String lockPath = KeyBuilder.datastreamTaskLock(_cluster, task.getConnectorType(), previousTask);
       if (_zkclient.exists(lockPath)) {
         String owner = _zkclient.ensureReadData(lockPath);
@@ -1051,6 +1059,9 @@ public class ZkAdapter {
      * happen after a datastream update.
      */
     void onDatastreamUpdate();
+
+
+    void onPartitionMovement();
   }
 
   /**
@@ -1250,4 +1261,39 @@ public class ZkAdapter {
     }
   }
 
+
+  public class ZkTargetAssignmentProvider implements IZkDataListener {
+    private final String _path;
+
+
+    public ZkTargetAssignmentProvider() {
+      _path = KeyBuilder.getTargetAssignmentBase(_cluster);
+      LOG.info("ZkTargetAssignmentProvider::Subscribing to the changes under the path " + _path);
+
+      //TODO do we need to ensure _path
+      _zkclient.subscribeDataChanges(_path, this);
+    }
+
+    /**
+     * Unsubscribe to all changes to the task assignment for this instance.
+     */
+    public void close() {
+      LOG.info("ZkTargetAssignmentProvider::Unsubscribing to the changes under the path " + _path);
+      _zkclient.unsubscribeDataChanges(_path, this);
+    }
+
+    @Override
+    public void handleDataChange(String dataPath, Object data) throws Exception {
+      LOG.info("ZkTargetAssignmentProvider::Received Data change notification on the path {}, data {}.", dataPath, data);
+      if (_listener != null && data != null && !data.toString().isEmpty()) {
+        // only care about the data change when there is an update in the data node
+        _listener.onPartitionMovement();
+      }
+    }
+
+    @Override
+    public void handleDataDeleted(String dataPath) throws Exception {
+      // do nothing
+    }
+  }
 }

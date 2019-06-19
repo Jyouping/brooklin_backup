@@ -5,6 +5,9 @@
  */
 package com.linkedin.datastream.server;
 
+import java.util.Optional;
+
+
 /**
  * Represents different event types inside {@link Coordinator}.
  */
@@ -26,10 +29,6 @@ public class CoordinatorEvent {
 
   public static final CoordinatorEvent LEADER_DO_ASSIGNMENT_EVENT =
       new CoordinatorEvent(EventType.LEADER_DO_ASSIGNMENT);
-  public static final CoordinatorEvent LEADER_PARTITION_ASSIGNMENT_EVENT =
-      new CoordinatorEvent(EventType.LEADER_PARTITION_ASSIGNMENT);
-  public static final CoordinatorEvent LEADER_PARTITION_MOVEMENT_EVENT =
-      new CoordinatorEvent(EventType.LEADER_PARTITION_MOVEMENT);
   public static final CoordinatorEvent HANDLE_ASSIGNMENT_CHANGE_EVENT =
       new CoordinatorEvent(EventType.HANDLE_ASSIGNMENT_CHANGE);
   public static final CoordinatorEvent HANDLE_DATASTREAM_CHANGE_WITH_UPDATE_EVENT =
@@ -38,9 +37,16 @@ public class CoordinatorEvent {
       new CoordinatorEvent(EventType.HANDLE_ADD_OR_DELETE_DATASTREAM);
   public static final CoordinatorEvent HEARTBEAT_EVENT = new CoordinatorEvent(EventType.HEARTBEAT);
   protected final EventType _eventType;
+  protected final Optional<String> _datastreamGroupName;
 
   private CoordinatorEvent(EventType eventType) {
     _eventType = eventType;
+    _datastreamGroupName = Optional.empty();
+  }
+
+  private CoordinatorEvent(EventType eventType, String datastreamGroupName) {
+    _eventType = eventType;
+    _datastreamGroupName = Optional.of(datastreamGroupName);
   }
 
   /**
@@ -62,6 +68,18 @@ public class CoordinatorEvent {
    */
   public static CoordinatorEvent createHandleDatastreamChangeEvent() {
     return HANDLE_DATASTREAM_CHANGE_WITH_UPDATE_EVENT;
+  }
+
+  /**
+   * Return an event that indicates a partition movement has been received for a datastreamGroup
+   */
+  public static CoordinatorEvent createPartitionMovementEvent() {
+    return new CoordinatorEvent(EventType.LEADER_PARTITION_MOVEMENT);
+  }
+
+
+  public static CoordinatorEvent createLeaderPartitionAssignmentEvent(String datastreamGroupName) {
+    return new CoordinatorEvent(EventType.LEADER_PARTITION_ASSIGNMENT, datastreamGroupName);
   }
 
   /**

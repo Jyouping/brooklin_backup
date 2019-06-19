@@ -5,7 +5,7 @@
  */
 package com.linkedin.datastream.server.dms;
 
-import com.linkedin.datastream.server.SuggestedAssignment;
+import com.linkedin.datastream.server.TargetAssignment;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -345,9 +345,9 @@ public class DatastreamResources extends CollectionResourceTemplate<String, Data
 
     //To be implemented
     List<String> targetPartitions = Arrays.asList(partitions.split(","));
-    SuggestedAssignment suggestedAssignment = new SuggestedAssignment(targetPartitions, host);
+    TargetAssignment targetAssignment = new TargetAssignment(targetPartitions, host);
     try {
-      _store.updateDatastreamPartitions(datastream.getName(), datastream, suggestedAssignment);
+      _store.updateDatastreamPartitions(datastream.getName(), datastream, targetAssignment);
     } catch (Exception ex) {
       LOG.error("Error to move partitions", ex);
       _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_500_INTERNAL_SERVER_ERROR,

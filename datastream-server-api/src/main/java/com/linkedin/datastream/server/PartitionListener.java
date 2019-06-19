@@ -6,41 +6,48 @@
 package com.linkedin.datastream.server;
 
 import java.util.List;
-import java.util.function.BiConsumer;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 
 /**
- * doc
+ * Partition Listener listens the topic partitions change for all registered datastream groups. It is required to
+ * implement this interface if the connector wants to manage the assignment
  */
 public interface PartitionListener {
 
   /**
-   * st
+   * start the partition listener, the consumer function will be triggered when a partition change is detected for
+   * a registered datastream. It passes the name of datastream group as a consumer param
    */
-  void start(BiConsumer<String, List<String>> changeCallback);
+  void start(Consumer<String> callback);
 
   /**
-   * doc
-   */
-  List<String> getSubscribedPartitions(String datastreamGroupName);
-
-
-
-
-  void shutdown();
-
-  /**
-   *
+   * Register a datastream group into the partition listener, partition listener will create and maintain a
+   * dedicated listening thread for that datastream group. This needs to be called if the datastream is created/resumed
    */
   void register(DatastreamGroup datastreamGroup);
 
   /**
-   *
+   *  deregister a datastream group from partition listener, partition listener will close the topic listening thread
+   *  for that datastream group. This needs to be called if the datastream is paused or deleted
    */
-  void unregister(String datastreamGroupName);
+  void deregister(String datastreamGroupName);
+
 
   /**
-   *
+   * Get the partitions for a given datastream group. Return Optional.empty() if the datastreamGroup is not found or
+   * if the partitions has not yet fetched through the listening thread
+   */
+  Optional<List<String>> getSubscribedPartitions(String datastreamGroupName);
+
+  /**
+   * Get the list of registered datastream group which has a topic listening thread running
    */
   List<String> getRegisteredDatastreamGroups();
+
+  /**
+   * Shut down the partition listener
+   */
+  void shutdown();
 }

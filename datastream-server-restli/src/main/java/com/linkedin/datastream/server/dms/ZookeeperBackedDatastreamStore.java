@@ -5,7 +5,7 @@
  */
 package com.linkedin.datastream.server.dms;
 
-import com.linkedin.datastream.server.SuggestedAssignment;
+import com.linkedin.datastream.server.TargetAssignment;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -115,19 +115,27 @@ public class ZookeeperBackedDatastreamStore implements DatastreamStore {
   }
 
   @Override
-  public void updateDatastreamPartitions(String key, Datastream datastream, SuggestedAssignment suggestedAssignment)
+  public void updateDatastreamPartitions(String key, Datastream datastream, TargetAssignment targetAssignment)
   {
     Validate.notNull(datastream, "null datastream");
     Validate.notNull(key, "null key for datastream" + datastream);
 
     long current = System.currentTimeMillis();
     String datastreamGroupName  = DatastreamUtils.getTaskPrefix(datastream);
-    String path = KeyBuilder.getSuggestedAssignment(_cluster, datastreamGroupName);
+    String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
     _zkClient.ensurePath(path);
     if (_zkClient.exists(path)){
-      String json = suggestedAssignment.toJson();
+      String json = targetAssignment.toJson();
       _zkClient.ensurePath(path + '/' + current);
       _zkClient.writeData(path + '/' + current, json);
+    }
+    //Todo touch assignment update
+    try {
+      _zkClient.writeData(KeyBuilder.getTargetAssignmentBase(_cluster), String.valueOf(System.currentTimeMillis()));
+    } catch (Exception e) {
+      // we don't need to do an atomic update; if the node gets update by others somehow or get deleted by
+      // leader, it's ok to ignore the failure
+      LOG.warn("Failed to touch the assignment update", e);
     }
   }
 

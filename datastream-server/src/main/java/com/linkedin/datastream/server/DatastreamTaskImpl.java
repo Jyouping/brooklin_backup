@@ -75,7 +75,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   private List<Integer> _partitions;
   private List<String> _partitionsV2;
 
-  private List<String> _previousTaskNames;
+  private List<String> _dependentTasks;
 
   // Status to indicate if instance has hooked up and process this object
   private ZkAdapter _zkAdapter;
@@ -95,7 +95,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
     _id = UUID.randomUUID().toString();
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>();
-    _previousTaskNames = new ArrayList<>();
+    _dependentTasks = new ArrayList<>();
   }
 
   /**
@@ -140,7 +140,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
       }
     }
     LOG.info("Created new DatastreamTask " + this);
-    _previousTaskNames = new ArrayList<>();
+    _dependentTasks = new ArrayList<>();
   }
 
 
@@ -157,11 +157,15 @@ public class DatastreamTaskImpl implements DatastreamTask {
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>(partitionsV2);
     _zkAdapter = oldTask._zkAdapter;
+    _eventProducer = oldTask._eventProducer;
+    _checkpoints = oldTask._checkpoints;
+    _transportProviderName = oldTask._transportProviderName;
+    _destinationSerDes = oldTask._destinationSerDes;
 
-    _previousTaskNames = new ArrayList<>();
-    _previousTaskNames.add(oldTask.getDatastreamTaskName());
+    _dependentTasks = new ArrayList<>();
+    _dependentTasks.add(oldTask.getDatastreamTaskName());
     if (!oldTask.isAcquired()) {
-      _previousTaskNames.addAll(oldTask._previousTaskNames);
+      _dependentTasks.addAll(oldTask._dependentTasks);
     }
   }
 
@@ -279,9 +283,9 @@ public class DatastreamTaskImpl implements DatastreamTask {
   @Override
   public void acquire(Duration timeout) {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
-    if (!_previousTaskNames.isEmpty()) {
+    if (!_dependentTasks.isEmpty()) {
       _zkAdapter.waitForPrevTasksToBeReleased(this, timeout);
-      _previousTaskNames.clear();
+      _dependentTasks.clear();
     }
     try {
       _zkAdapter.acquireTask(this, timeout);
@@ -411,7 +415,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public String toString() {
     // toString() is mainly for logging purpose, feel free to modify the content/format
     return String.format("%s(%s), partitionsV2=%s, partitions=%s, dependencies=%s", getDatastreamTaskName(), _connectorType,
-        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions), _previousTaskNames);
+        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions), _dependentTasks);
   }
 
   public void setZkAdapter(ZkAdapter adapter) {
@@ -429,12 +433,12 @@ public class DatastreamTaskImpl implements DatastreamTask {
   }
 
 
-  public List<String> getPreviousTaskNames() {
-    return _previousTaskNames;
+  public List<String> getDependentTasks() {
+    return _dependentTasks;
   }
 
   public void addPreviousTask(String taskName) {
-    _previousTaskNames.add(taskName);
+    _dependentTasks.add(taskName);
   }
 
 }

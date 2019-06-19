@@ -80,7 +80,11 @@ public final class KeyBuilder {
    */
   private static final String PENDING_PARTITIONS = DATASTREAM_WITH_PENDING_PARTITION + "/%s";
 
-  private static final String SUGGESTED_ASSIGNEMENT = CLUSTER + "/suggestedAssignment/%s";
+  private static final String TARGET_ASSIGNMENT_BASE = CLUSTER + "/targetAssignment";
+
+  private static final String TARGET_ASSIGNMENTS = TARGET_ASSIGNMENT_BASE + "/%s";
+
+
 
 
 
@@ -307,7 +311,11 @@ public final class KeyBuilder {
    * @param datastreamGroupName
    * @return
    */
-  public static String getSuggestedAssignment(String cluster, String datastreamGroupName) {
-    return String.format(SUGGESTED_ASSIGNEMENT, cluster, datastreamGroupName).replaceAll("//", "/'");
+  public static String getTargetAssignment(String cluster, String datastreamGroupName) {
+    return String.format(TARGET_ASSIGNMENTS, cluster, datastreamGroupName).replaceAll("//", "/'");
+  }
+
+  public static String getTargetAssignmentBase(String cluster) {
+    return String.format(TARGET_ASSIGNMENT_BASE, cluster).replaceAll("//", "/'");
   }
 }
