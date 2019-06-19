@@ -5,7 +5,6 @@
  */
 package com.linkedin.datastream.connectors.kafka.mirrormaker;
 
-import java.io.OutputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;

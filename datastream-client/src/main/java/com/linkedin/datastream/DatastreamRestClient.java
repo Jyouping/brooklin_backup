@@ -529,9 +529,17 @@ public class DatastreamRestClient {
         Duration.between(startTime, Instant.now()).toMillis());
   }
 
-
+  /**
+   * move partitions to the target host
+   * @param datastreamName
+   *    Name of the datastream to resume.
+   * @param partitions
+   *    partitions that need to be moved
+   * @param host
+   *    the target host the partition assignment
+   * @throws RemoteInvocationException
+   */
   public void movePartitions(String datastreamName, String partitions, String host) throws RemoteInvocationException {
-    Instant startTime = Instant.now();
     PollUtils.poll(() -> {
       try {
         ActionRequest<Void> request = _builders.actionMovePartitions().id(datastreamName).
@@ -540,14 +548,14 @@ public class DatastreamRestClient {
         return datastreamResponseFuture.getResponse();
       } catch (RemoteInvocationException e) {
         if (ExceptionUtils.getRootCause(e) instanceof TimeoutException) {
-          LOG.warn("Timeout: pause. May retry...", e);
+          LOG.warn("Timeout: movePartitions. May retry...", e);
           return null;
         }
         if (isNotFoundHttpStatus(e)) {
           LOG.warn(String.format("Datastream {%s} is not found", datastreamName), e);
           throw new DatastreamNotFoundException(datastreamName, e);
         } else {
-          String errorMessage = String.format("Resume Datastream {%s} failed with error.", datastreamName);
+          String errorMessage = String.format("move partitions failed with error, Datastream {%s}.", datastreamName);
           ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, errorMessage, e);
         }
         return null; // not reachable

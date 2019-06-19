@@ -5,11 +5,6 @@
  */
 package com.linkedin.datastream.server.assignment;
 
-import com.linkedin.datastream.common.DatastreamRuntimeException;
-import com.linkedin.datastream.server.DatastreamGroup;
-import com.linkedin.datastream.server.DatastreamTask;
-import com.linkedin.datastream.server.DatastreamTaskImpl;
-import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -22,8 +17,14 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.server.DatastreamGroup;
+import com.linkedin.datastream.server.DatastreamTask;
+import com.linkedin.datastream.server.DatastreamTaskImpl;
+import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
 
 /**
+ * An assignment strategy for partition assignment
  */
 public class StickyPartitionAssignmentStrategy implements PartitionAssignmentStrategy  {
   private static final Logger LOG = LoggerFactory.getLogger(StickyPartitionAssignmentStrategy.class.getName());
