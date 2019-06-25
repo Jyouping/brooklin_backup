@@ -5,7 +5,6 @@
  */
 package com.linkedin.datastream.server.dms;
 
-import com.linkedin.datastream.server.TargetAssignment;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -18,8 +17,9 @@ import com.linkedin.datastream.common.DatastreamAlreadyExistsException;
 import com.linkedin.datastream.common.DatastreamException;
 import com.linkedin.datastream.common.DatastreamStatus;
 import com.linkedin.datastream.common.DatastreamUtils;
-import com.linkedin.datastream.common.zk.ZkClient;
 import com.linkedin.datastream.server.CachedDatastreamReader;
+import com.linkedin.datastream.server.TargetAssignment;
+import com.linkedin.datastream.common.zk.ZkClient;
 import com.linkedin.datastream.server.zk.KeyBuilder;
 
 /**

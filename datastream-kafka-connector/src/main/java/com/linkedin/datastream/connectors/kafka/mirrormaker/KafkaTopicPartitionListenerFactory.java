@@ -13,12 +13,13 @@ import com.linkedin.datastream.server.PartitionListener;
 import java.util.Properties;
 
 /**
- * doc
+ * A Partition listener implementation for Kafka based connector
  */
 public class KafkaTopicPartitionListenerFactory implements PartitionListenerFactory {
   public static final String DOMAIN_KAFKA_CONSUMER = "consumer";
+
   /**
-   * doc
+   * create a Kafka partition listener instance
    */
   public PartitionListener createPartitionListener(String clusterName, Properties config) {
     GroupIdConstructor groupIdConstructor = new KafkaMirrorMakerGroupIdConstructor(false, clusterName);

@@ -566,7 +566,7 @@ public class TestZkAdapter {
    * Update all datastream task assignments of a particular Brooklin instance
    * @param adapter ZooKeeper adapter to use
    * @param instance Brooklin/Coordinator instance name
-   * @param assignments new datasteam tasks to movePartitions to the Brooklin instance
+   * @param assignments new datasteam tasks to assign to the Brooklin instance
    */
   public static void updateInstanceAssignment(ZkAdapter adapter, String instance, List<DatastreamTask> assignments) {
     Map<String, List<DatastreamTask>> allAssignments = new HashMap<>();

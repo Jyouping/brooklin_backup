@@ -5,11 +5,11 @@
  */
 package com.linkedin.datastream.server.dms;
 
-import com.linkedin.datastream.server.TargetAssignment;
 import java.util.stream.Stream;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamException;
+import com.linkedin.datastream.server.TargetAssignment;
 
 
 /**

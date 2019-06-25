@@ -5,7 +5,6 @@
  */
 package com.linkedin.datastream.server.zk;
 
-import com.linkedin.datastream.server.TargetAssignment;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -40,6 +39,8 @@ import com.linkedin.datastream.common.ErrorLogger;
 import com.linkedin.datastream.common.zk.ZkClient;
 import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.DatastreamTaskImpl;
+import com.linkedin.datastream.server.TargetAssignment;
+
 
 
 /**
@@ -937,14 +938,21 @@ public class ZkAdapter {
     }
   }
 
-  public void cleanUpSuggestedAssignment(String datastreamGroupName) {
+  /**
+   * Clean up partition movement info for a particular datastream
+   */
+  public void cleanUpPartitionMovement(String datastreamGroupName) {
     String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
     if (_zkclient.exists(path)) {
       _zkclient.deleteRecursive(path);
     }
   }
 
-  public List<String> getDatastreamsWithTargetAssignment() {
+  /**
+   * Get the datastream group which contains the parition movement info
+   * @return
+   */
+  public List<String> getDatastreamsNeedPartitionMovement() {
     String path = KeyBuilder.getTargetAssignmentBase(_cluster);
     if (_zkclient.exists(path)) {
       return _zkclient.getChildren(path);
@@ -952,7 +960,12 @@ public class ZkAdapter {
     return Collections.emptyList();
   }
 
-  public Map<String, Set<String>> getTargetAssignment(String datastreamGroupName) {
+  /**
+   * Get a partition movement info for a particular datastream
+   * @param datastreamGroupName
+   * @return The target assignment mapping information with the partition names and its target instance name
+   */
+  public Map<String, Set<String>> getPartitionMovement(String datastreamGroupName) {
     Map<String, Set<String>> result = new HashMap<>();
 
     String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
@@ -964,7 +977,7 @@ public class ZkAdapter {
 
         //Compute the correct instance
         Map<String, String> hostInstanceMap = new HashMap<>();
-        if (_liveInstancesProvider.getLiveInstances() != null ) {
+        if (_liveInstancesProvider.getLiveInstances() != null) {
           _liveInstancesProvider.getLiveInstances().stream().forEach(instance -> {
             try {
               hostInstanceMap.put(instance.substring(0, instance.lastIndexOf('-')), instance);
@@ -984,15 +997,20 @@ public class ZkAdapter {
     return result;
   }
 
-  public boolean checkIfTaskAcquire(String connectorType, String taskName) {
+  /**
+   * Check if the task is current locked
+   */
+  public boolean checkIfTaskLocked(String connectorType, String taskName) {
     String lockPath = KeyBuilder.datastreamTaskLock(_cluster, connectorType, taskName);
     return (_zkclient.exists(lockPath));
   }
+
   /**
-   * @param task
-   * @param timeout
+   * Wait for all dependencies to be cleared
+   * @param task Datastream task whose dependencies need to be checked
+   * @param timeout max wait time to wait for a locked task for releasing
    */
-  public void waitForPrevTasksToBeReleased(DatastreamTaskImpl task, Duration timeout) {
+  public void waitForDependencies(DatastreamTaskImpl task, Duration timeout) {
     task.getDependentTasks().stream().forEach(previousTask -> {
         String lockPath = KeyBuilder.datastreamTaskLock(_cluster, task.getConnectorType(), previousTask);
       if (_zkclient.exists(lockPath)) {
@@ -1068,7 +1086,9 @@ public class ZkAdapter {
      */
     void onDatastreamUpdate();
 
-
+    /**
+     * onPartitionMovement is called when partition movement info has been put into zookeeper
+     */
     void onPartitionMovement();
   }
 
@@ -1269,16 +1289,19 @@ public class ZkAdapter {
     }
   }
 
-
+  /**
+   * ZkTargetAssignmentProvider detect if there is a partition movement being intiated from restful endpoint
+   */
   public class ZkTargetAssignmentProvider implements IZkDataListener {
     private final String _path;
 
-
+    /**
+     * Constructor
+     */
     public ZkTargetAssignmentProvider() {
       _path = KeyBuilder.getTargetAssignmentBase(_cluster);
       LOG.info("ZkTargetAssignmentProvider::Subscribing to the changes under the path " + _path);
 
-      //TODO do we need to ensure _path
       _zkclient.subscribeDataChanges(_path, this);
     }
 

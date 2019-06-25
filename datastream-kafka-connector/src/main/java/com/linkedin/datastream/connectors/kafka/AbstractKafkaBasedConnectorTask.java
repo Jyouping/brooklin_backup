@@ -944,13 +944,4 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
         tracker -> new DatastreamPositionResponse(ImmutableMap.of(_datastreamName, tracker.getOffsetPositions())))
         .orElse(null);
   }
-
-
-  public void setDatastreamTask(DatastreamTask task) {
-    _datastreamTask = task;
-  }
-
-  public DatastreamTask getDatastreamTask() {
-    return _datastreamTask;
-  }
 }

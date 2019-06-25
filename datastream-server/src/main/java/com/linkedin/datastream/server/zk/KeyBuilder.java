@@ -66,22 +66,13 @@ public final class KeyBuilder {
   private static final String DATASTREAM_TASK_LOCK = CONNECTOR + "/%s/lock";
 
   /**
-   *
+   * Base path to store partition movement info
    */
-  private static final String ALL_PENDING_PARTITIONS = CLUSTER + "partitions/pending";
-
-  /**
-   *
-   */
-  private static final String DATASTREAM_WITH_PENDING_PARTITION = ALL_PENDING_PARTITIONS + "/%s";
-
-  /**
-   *
-   */
-  private static final String PENDING_PARTITIONS = DATASTREAM_WITH_PENDING_PARTITION + "/%s";
-
   private static final String TARGET_ASSIGNMENT_BASE = CLUSTER + "/targetAssignment";
 
+  /**
+   * partition movement info under cluster/datastreamGroup
+   */
   private static final String TARGET_ASSIGNMENTS = TARGET_ASSIGNMENT_BASE + "/%s";
 
 
@@ -280,41 +271,20 @@ public final class KeyBuilder {
   }
 
   /**
-   *  test
-   */
-  public static String pendingPartitions(String cluster, String taskPrefix, String partition) {
-    return String.format(PENDING_PARTITIONS, cluster, taskPrefix, partition).replaceAll("//", "/");
-  }
-
-  /**
-   *
-   * @param cluster
-   * @param taskPrefix
-   * @return
-   */
-  public static String getPendingPartitionsForDatastream(String cluster, String taskPrefix) {
-    return String.format(DATASTREAM_WITH_PENDING_PARTITION, cluster, taskPrefix).replaceAll("//", "/");
-  }
-
-  /**
-   *
-   * @param cluster
-   * @return
-   */
-  public static String getAllPendingPartitions(String cluster) {
-    return String.format(ALL_PENDING_PARTITIONS, cluster).replaceAll("//", "/");
-  }
-
-  /**
-   *
-   * @param cluster
-   * @param datastreamGroupName
+   * Get the partition movement information for a specific datastream group
+   * @param cluster Brooklin cluster name
+   * @param datastreamGroupName Datastream group name
    * @return
    */
   public static String getTargetAssignment(String cluster, String datastreamGroupName) {
     return String.format(TARGET_ASSIGNMENTS, cluster, datastreamGroupName).replaceAll("//", "/'");
   }
 
+  /**
+   * Get all partition movement information
+   * @param cluster Brooklin cluster name
+   * @return
+   */
   public static String getTargetAssignmentBase(String cluster) {
     return String.format(TARGET_ASSIGNMENT_BASE, cluster).replaceAll("//", "/'");
   }

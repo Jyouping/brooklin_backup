@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -78,6 +77,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   private static final String KAFKA_ORIGIN_TOPIC = "kafka-origin-topic";
   private static final String KAFKA_ORIGIN_PARTITION = "kafka-origin-partition";
   private static final String KAFKA_ORIGIN_OFFSET = "kafka-origin-offset";
+  private static final Duration ACQUIRE_TIMEOUT = Duration.ofMinutes(5);
 
   // constants for flushless mode and flow control
   protected static final String CONFIG_MAX_IN_FLIGHT_MSGS_THRESHOLD = "maxInFlightMessagesThreshold";
@@ -104,16 +104,14 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   // variables for flushless mode and flow control
   private final boolean _isFlushlessModeEnabled;
   private final boolean _isIdentityMirroringEnabled;
+  private final boolean _useBrooklinForPartitionAssignment;
   private FlushlessEventProducerHandler<Long> _flushlessProducer = null;
   private boolean _flowControlEnabled = false;
   private long _maxInFlightMessagesThreshold;
   private long _minInFlightMessagesThreshold;
   private int _flowControlTriggerCount = 0;
-  private final boolean _useBrooklinForPartitionAssignment;
 
   private GroupIdConstructor _groupIdConstructor;
-  protected static final long DEFAULT_MIN_WAIT_TIME_BEFORE_REASSIGNMENT_MS = 10000;
-  private Set<TopicPartition> _cachedTaskAssignedPartitions = Collections.synchronizedSet(new HashSet<>());
 
 
 
@@ -201,19 +199,13 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   }
 
   private Set<TopicPartition> getAssignedTopicPartitionFromTask() {
-    if (!_cachedTaskAssignedPartitions.isEmpty()) {
-      return _cachedTaskAssignedPartitions;
-    } else {
-      _cachedTaskAssignedPartitions.addAll(
-          _datastreamTask.getPartitionsV2().stream().map(str -> {
+
+    return _datastreamTask.getPartitionsV2().stream().map(str -> {
             int i = str.lastIndexOf("-");
             int partition = Integer.valueOf(str.substring(i + 1));
             String topic = str.substring(0, i);
             return new TopicPartition(topic, partition);
-          }).collect(Collectors.toSet())
-      );
-      return _cachedTaskAssignedPartitions;
-    }
+          }).collect(Collectors.toSet());
   }
 
   @Override
@@ -289,7 +281,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   @Override
   public void run() {
     if (_useBrooklinForPartitionAssignment) {
-      _datastreamTask.acquire(Duration.ofMillis(1));
+      _datastreamTask.acquire(ACQUIRE_TIMEOUT);
     }
     super.run();
   }
@@ -435,12 +427,4 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   public TopicManager getTopicManager() {
     return _topicManager;
   }
-
-  @Override
-  public synchronized void setDatastreamTask(DatastreamTask task) {
-    _logger.info("DatastreamTask {} in set to the connector", task.getDatastreamTaskName());
-    _cachedTaskAssignedPartitions.clear();
-    _datastreamTask = task;
-  }
-
 }

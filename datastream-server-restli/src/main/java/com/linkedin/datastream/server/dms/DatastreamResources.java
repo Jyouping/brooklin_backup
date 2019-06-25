@@ -5,7 +5,6 @@
  */
 package com.linkedin.datastream.server.dms;
 
-import com.linkedin.datastream.server.TargetAssignment;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,6 +46,7 @@ import com.linkedin.datastream.server.Coordinator;
 import com.linkedin.datastream.server.DatastreamGroup;
 import com.linkedin.datastream.server.DatastreamServer;
 import com.linkedin.datastream.server.ErrorLogger;
+import com.linkedin.datastream.server.TargetAssignment;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
 import com.linkedin.datastream.server.api.security.AuthorizationException;
 import com.linkedin.restli.common.HttpStatus;

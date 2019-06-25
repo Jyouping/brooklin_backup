@@ -5,9 +5,6 @@
  */
 package com.linkedin.datastream.server;
 
-import com.google.common.collect.ImmutableList;
-import com.linkedin.datastream.server.api.strategy.PartitionAssignmentStrategy;
-import com.linkedin.datastream.server.assignment.StickyPartitionAssignmentStrategy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.MetricRegistry;
+import com.google.common.collect.ImmutableList;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamAlreadyExistsException;
@@ -71,6 +69,7 @@ import com.linkedin.datastream.server.api.strategy.AssignmentStrategy;
 import com.linkedin.datastream.server.api.transport.TransportException;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 import com.linkedin.datastream.server.api.transport.TransportProviderAdmin;
+import com.linkedin.datastream.server.assignment.StickyPartitionAssignmentStrategy;
 import com.linkedin.datastream.server.providers.CheckpointProvider;
 import com.linkedin.datastream.server.providers.ZookeeperCheckpointProvider;
 import com.linkedin.datastream.server.zk.ZkAdapter;
@@ -921,7 +920,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     Map<String, Set<DatastreamTask>> previousAssignmentByInstance = Collections.emptyMap();
     Map<String, List<DatastreamTask>> newAssignmentsByInstance = Collections.emptyMap();
 
-    //TODO, Datastream update: will it be a new dsg or not?
     try {
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
 
@@ -982,7 +980,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       Map<String, DatastreamGroup> dgMap = datastreamGroups.stream().collect(
           Collectors.toMap(DatastreamGroup::getTaskPrefix, Function.identity()));
 
-      PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
+      StickyPartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
 
       for (String connectorType : _connectors.keySet()) {
         PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
@@ -995,7 +993,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           for (String dgName : datastreamGroupNames) {
             List<String> subscribes = partitionListener.getPartitions(dgName)
                 .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
-            assignmentByInstance = partitionAssignmentStrategy.assignSubscribedPartitions(dgMap.get(dgName), assignmentByInstance, subscribes);
+            assignmentByInstance = partitionAssignmentStrategy.assignPartitions(dgMap.get(dgName), assignmentByInstance, subscribes);
           }
         }
       }
@@ -1029,10 +1027,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
 
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
-      List<String> toProcessDatastreams = _adapter.getDatastreamsWithTargetAssignment();
+      List<String> toProcessDatastreams = _adapter.getDatastreamsNeedPartitionMovement();
 
       Map<String, DatastreamGroup> dgMap = datastreamGroups.stream().collect(Collectors.toMap(k -> k.getTaskPrefix(), v -> v));
-      PartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
+      StickyPartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
 
       for (String connectorType : _connectors.keySet()) {
         PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
@@ -1043,12 +1041,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           datastreamGroupNames.retainAll(toProcessDatastreams);
 
           for (String dgName : datastreamGroupNames) {
-            List<String> subscribedPartitions = partitionListener.getSubscribedPartitions(dgName)
-                .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
-            Map<String, Set<String>> suggestedAssignment = _adapter.getTargetAssignment(dgName);
+            List<String> subscribedPartitions = partitionListener.getPartitions(dgName)
+                .orElseThrow(() -> new RuntimeException("partition listener is not ready yet for datastream " + dgName));
+            Map<String, Set<String>> suggestedAssignment = _adapter.getPartitionMovement(dgName);
              assignmentByInstance = partitionAssignmentStrategy.movePartitions(dgMap.get(dgName), assignmentByInstance,
                 suggestedAssignment, subscribedPartitions);
-            _adapter.cleanUpSuggestedAssignment(dgName);
+            _adapter.cleanUpPartitionMovement(dgName);
           }
         }
       }
@@ -1122,7 +1120,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           .collect(Collectors.toList());
 
       // Get the list of tasks per instance for the given connector type
-      // We need to call movePartitions even if the number of datastreams are empty, This is to make sure that
+      // We need to call assign even if the number of datastreams are empty, This is to make sure that
       // the assignments get cleaned up for the deleted datastreams.
       Map<String, Set<DatastreamTask>> tasksByConnectorAndInstance =
           strategy.assign(datastreamsPerConnectorType, liveInstances, previousAssignmentByInstance);
@@ -1443,9 +1441,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   /**
-   * Add a transport provider that the coordinator can movePartitions to datastreams it creates.
+   * Add a transport provider that the coordinator can assign to datastreams it creates.
    * @param transportProviderName Name of transport provider.
-   * @param admin Instance of TransportProviderAdmin that the coordinator can movePartitions.
+   * @param admin Instance of TransportProviderAdmin that the coordinator can assign.
    */
   public void addTransportProvider(String transportProviderName, TransportProviderAdmin admin) {
     _transportProviderAdmins.put(transportProviderName, admin);
@@ -1455,9 +1453,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   /**
-   * Add a Serde that the coordinator can movePartitions to datastreams it creates.
+   * Add a Serde that the coordinator can assign to datastreams it creates.
    * @param serdeName Name of Serde.
-   * @param admin Instance of SerdeAdmin that the coordinator can movePartitions.
+   * @param admin Instance of SerdeAdmin that the coordinator can assign.
    */
   public void addSerde(String serdeName, SerdeAdmin admin) {
     _serdeAdmins.put(serdeName, admin);

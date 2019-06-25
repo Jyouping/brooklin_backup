@@ -145,27 +145,25 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
 
   /**
-   * Constructor for DatastreamTaskImpl.
-   * @param datastreams Datastreams associated with the task.
-   * @param id Task ID
-   * @param partitionsV2
-   * @param previousTaskNames
+   * Constructor for new DatastreamTaskImpl which inherits some partitions from previous Task
+   * @param dependentTask task which need to release the partitions
+   * @param partitionsV2 new partitions for this task
    */
-  public DatastreamTaskImpl(DatastreamTaskImpl oldTask, Collection<String> partitionsV2) {
-    this(oldTask.getDatastreams());
+  public DatastreamTaskImpl(DatastreamTaskImpl dependentTask, Collection<String> partitionsV2) {
+    this(dependentTask.getDatastreams());
 
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>(partitionsV2);
-    _zkAdapter = oldTask._zkAdapter;
-    _eventProducer = oldTask._eventProducer;
-    _checkpoints = oldTask._checkpoints;
-    _transportProviderName = oldTask._transportProviderName;
-    _destinationSerDes = oldTask._destinationSerDes;
+    _zkAdapter = dependentTask._zkAdapter;
+    _eventProducer = dependentTask._eventProducer;
+    _checkpoints = dependentTask._checkpoints;
+    _transportProviderName = dependentTask._transportProviderName;
+    _destinationSerDes = dependentTask._destinationSerDes;
 
     _dependentTasks = new ArrayList<>();
-    _dependentTasks.add(oldTask.getDatastreamTaskName());
-    if (!oldTask.isAcquired()) {
-      _dependentTasks.addAll(oldTask._dependentTasks);
+    _dependentTasks.add(dependentTask.getDatastreamTaskName());
+    if (!dependentTask.isLocked()) {
+      _dependentTasks.addAll(dependentTask._dependentTasks);
     }
   }
 
@@ -284,7 +282,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public void acquire(Duration timeout) {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     if (!_dependentTasks.isEmpty()) {
-      _zkAdapter.waitForPrevTasksToBeReleased(this, timeout);
+      _zkAdapter.waitForDependencies(this, timeout);
       _dependentTasks.clear();
     }
     try {
@@ -296,9 +294,12 @@ public class DatastreamTaskImpl implements DatastreamTask {
     }
   }
 
-  public boolean isAcquired() {
+  /**
+   * check if task has acquired lock
+   */
+  public boolean isLocked() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
-    return _zkAdapter.checkIfTaskAcquire(_connectorType, getDatastreamTaskName());
+    return _zkAdapter.checkIfTaskLocked(_connectorType, getDatastreamTaskName());
   }
 
   @Override
@@ -437,7 +438,10 @@ public class DatastreamTaskImpl implements DatastreamTask {
     return _dependentTasks;
   }
 
-  public void addPreviousTask(String taskName) {
+  /**
+   * Add an dependent task to this task
+   */
+  public void addDependentTask(String taskName) {
     _dependentTasks.add(taskName);
   }
 

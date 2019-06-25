@@ -71,13 +71,17 @@ public class CoordinatorEvent {
   }
 
   /**
-   * Return an event that indicates a partition movement has been received for a datastreamGroup
+   * Return an event that indicates a partition movement has been received
    */
   public static CoordinatorEvent createPartitionMovementEvent() {
     return new CoordinatorEvent(EventType.LEADER_PARTITION_MOVEMENT);
   }
 
-
+  /**
+   * Retrun an event that indicates that partition need to be assigned for a datastream group
+   * @param datastreamGroupName the name of datastream group which receives partition changes
+   * @return
+   */
   public static CoordinatorEvent createLeaderPartitionAssignmentEvent(String datastreamGroupName) {
     return new CoordinatorEvent(EventType.LEADER_PARTITION_ASSIGNMENT, datastreamGroupName);
   }

@@ -8,12 +8,15 @@ package com.linkedin.datastream.server;
 import java.util.Properties;
 
 /**
- * doc
+ * Factory to create partition listener
  */
 public interface PartitionListenerFactory {
 
   /**
-   * doc
+   * create a partition listener instance
+   * @param clusterName name of the cluster
+   * @param config the config associated to this partition listener
+   * @return partition listener instance
    */
   PartitionListener createPartitionListener(String clusterName, Properties config);
 }
