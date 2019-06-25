@@ -32,7 +32,7 @@ import com.linkedin.datastream.server.DatastreamGroup;
 import com.linkedin.datastream.server.PartitionListener;
 
 /**
- * doc
+ * A partition listener to listen change from Kafka
  */
 public class KafkaTopicPartitionListener implements PartitionListener {
   private final Logger _log = LoggerFactory.getLogger(KafkaTopicPartitionListener.class.getName());
@@ -47,10 +47,10 @@ public class KafkaTopicPartitionListener implements PartitionListener {
   private boolean _shutdown;
 
   private Map<String, PartitionDiscoveryThread> _partitionDiscoveryThreadMap = new HashMap<>();
-  private java.util.function.Consumer<String> _discoveryCallback;
+  private java.util.function.Consumer<String> _partitionChangeCallback;
 
   /**
-   * doc
+   * Constructor for KafkaTopicPartitionListener
    */
   public KafkaTopicPartitionListener(KafkaConsumerFactory<?, ?> consumerFactory,
       GroupIdConstructor groupIdConstructor, Properties consumerProperties) {
@@ -61,8 +61,8 @@ public class KafkaTopicPartitionListener implements PartitionListener {
   }
 
   @Override
-  public void start(java.util.function.Consumer<String> callback) {
-    _discoveryCallback = callback;
+  public void onPartitionChange(java.util.function.Consumer<String> callback) {
+    _partitionChangeCallback = callback;
   }
 
   @Override
@@ -71,9 +71,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     _partitionDiscoveryThreadMap.values().forEach(Thread::interrupt);
   }
 
-  //TODO distinguished not ready vs emptylist
-  @Override
-  public Optional<List<String>> getSubscribedPartitions(String datastreamGroupName) {
+  public Optional<List<String>> getPartitions(String datastreamGroupName) {
     if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
       if (_partitionDiscoveryThreadMap.get(datastreamGroupName)._initialized) {
         return Optional.of(Collections.unmodifiableList(_partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions));
@@ -97,12 +95,8 @@ public class KafkaTopicPartitionListener implements PartitionListener {
 
   @Override
   public void register(DatastreamGroup datastreamGroup) {
-    //TODO check if exist
     String datastreamGroupName = datastreamGroup.getTaskPrefix();
-
     if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
-      //Update datastream to make sure the regex change will get reflected
-      //TODO: Should we clear out the assignment when updated?
       _partitionDiscoveryThreadMap.get(datastreamGroupName).setDatastream(datastreamGroup.getDatastreams().get(0));
     } else {
       PartitionDiscoveryThread partitionDiscoveryThread =
@@ -111,7 +105,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
       _partitionDiscoveryThreadMap.put(datastreamGroupName, partitionDiscoveryThread);
         _log.info("PartitionListener for {} registered", datastreamGroupName);
     }
-    _log.info("initial subscribed partitions {}", getSubscribedPartitions(datastreamGroupName));
+    _log.info("initial subscribed partitions {}", getPartitions(datastreamGroupName));
   }
 
   private Consumer<?, ?> createConsumer(Properties consumerProps, String bootstrapServers, String groupId) {
@@ -134,7 +128,8 @@ public class KafkaTopicPartitionListener implements PartitionListener {
     private Pattern _topicPattern;
     private boolean _initialized;
 
-    public PartitionDiscoveryThread(String datastreamGroupName, Datastream datastream) {
+
+    private PartitionDiscoveryThread(String datastreamGroupName, Datastream datastream) {
       _datastream  = datastream;
       _datastreamGroupName = datastreamGroupName;
       _topicPattern = Pattern.compile(
@@ -156,7 +151,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
       return topicPartitions.stream().map(TopicPartition::toString).sorted().collect(Collectors.toList());
     }
 
-
+    @Override
     public void run() {
       String bootstrapValue = String.join(KafkaConnectionString.BROKER_LIST_DELIMITER,
           KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString())
@@ -178,7 +173,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
 
             _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
             _initialized = true;
-            _discoveryCallback.accept(_datastreamGroupName);
+            _partitionChangeCallback.accept(_datastreamGroupName);
           }
           Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
         } catch (Throwable t) {

@@ -993,7 +993,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           datastreamGroupName.ifPresent(dg -> datastreamGroupNames.retainAll(ImmutableList.of(dg)));
 
           for (String dgName : datastreamGroupNames) {
-            List<String> subscribes = partitionListener.getSubscribedPartitions(dgName)
+            List<String> subscribes = partitionListener.getPartitions(dgName)
                 .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
             assignmentByInstance = partitionAssignmentStrategy.assignSubscribedPartitions(dgMap.get(dgName), assignmentByInstance, subscribes);
           }
@@ -1204,7 +1204,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     PartitionListener partitionListener = null;
     if (partitionListenerFactory != null) {
       partitionListener = partitionListenerFactory.createPartitionListener(_clusterName, _config.getConfigProperties());
-      partitionListener.start(datastreamGroupName -> {
+      partitionListener.onPartitionChange(datastreamGroupName -> {
         _eventQueue.put(CoordinatorEvent.createLeaderPartitionAssignmentEvent(datastreamGroupName));
       });
     }

@@ -17,10 +17,16 @@ import java.util.function.Consumer;
 public interface PartitionListener {
 
   /**
-   * start the partition listener, the consumer function will be triggered when a partition change is detected for
-   * a registered datastream. It passes the name of datastream group as a consumer param
+   * register the consumer function which is triggered when a partition change is detected for
+   * a registered datastream.
+   *
+   * The callback function is a lamda consumer takes the name of datastream group as a consumer. It is expected to
+   * be issued in the same thread that detecting the partition changed. Thus we expect this callback function to
+   * be finished very quickly
+   *
+   * @param callback a lamda consumer which takes the name of datastream group
    */
-  void start(Consumer<String> callback);
+  void onPartitionChange(Consumer<String> callback);
 
   /**
    * Register a datastream group into the partition listener, partition listener will create and maintain a
@@ -39,7 +45,7 @@ public interface PartitionListener {
    * Get the partitions for a given datastream group. Return Optional.empty() if the datastreamGroup is not found or
    * if the partitions has not yet fetched through the listening thread
    */
-  Optional<List<String>> getSubscribedPartitions(String datastreamGroupName);
+  Optional<List<String>> getPartitions(String datastreamGroupName);
 
   /**
    * Get the list of registered datastream group which has a topic listening thread running
