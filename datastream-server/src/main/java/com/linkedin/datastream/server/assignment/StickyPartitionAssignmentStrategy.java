@@ -48,7 +48,7 @@ public class StickyPartitionAssignmentStrategy {
     for (Set<DatastreamTask> tasks : currentAssignment.values()) {
       Set<DatastreamTask> dgTask = tasks.stream().filter(dg::belongsTo).collect(Collectors.toSet());
       dgTask.stream().forEach(t -> assignedPartitions.addAll(t.getPartitionsV2()));
-      totalTaskCount += tasks.size();
+      totalTaskCount += dgTask.size();
     }
 
     List<String> unassignedPartitions = new ArrayList<>(allPartitions);
@@ -89,7 +89,7 @@ public class StickyPartitionAssignmentStrategy {
     });
     LOG.info("new assignment info, assignment: {}, all partitions: {}", newAssignment, allPartitions);
 
-    sanityChecks(newAssignment, allPartitions);
+    sanityChecks(dg.getTaskPrefix(), newAssignment, allPartitions);
     return newAssignment;
   }
 
@@ -166,7 +166,7 @@ public class StickyPartitionAssignmentStrategy {
       newAssignment.get(inst).add(newTask);
     });
 
-    sanityChecks(newAssignment, allPartitions);
+    sanityChecks(dg.getTaskPrefix(), newAssignment, allPartitions);
     LOG.info("assignment info, task: {}", newAssignment);
     return newAssignment;
   }
@@ -174,15 +174,17 @@ public class StickyPartitionAssignmentStrategy {
   /**
    * check if the computed assignment have all the partitions
    */
-  private void sanityChecks(Map<String, Set<DatastreamTask>> assignedTasks, List<String> allPartitions) {
+  private void sanityChecks(String datastreamGroupName, Map<String, Set<DatastreamTask>> assignedTasks, List<String> allPartitions) {
     int total = 0;
 
     List<String> unassignedPartitions = new ArrayList<>(allPartitions);
 
     for (Set<DatastreamTask> tasksSet : assignedTasks.values()) {
       for (DatastreamTask task : tasksSet) {
-        total += task.getPartitionsV2().size();
-        unassignedPartitions.removeAll(task.getPartitionsV2());
+        if (datastreamGroupName.equals(task.getTaskPrefix())) {
+          total += task.getPartitionsV2().size();
+          unassignedPartitions.removeAll(task.getPartitionsV2());
+        }
       }
     }
     if (total != allPartitions.size()) {

@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.mockito.Mockito;
@@ -569,6 +570,122 @@ public class TestCoordinator {
     zkClient.close();
   }
 
+  @Test
+  public void testCoordinationWithPartitionAssignment() throws Exception {
+    String testCluster = "testCoordinationSmoke";
+    String testConnectorType = "testConnectorType";
+    Coordinator instance1 = createCoordinator(_zkConnectionString, testCluster);
+
+    int initialDelays = 1000;
+
+    List<String> partitions1 = ImmutableList.of("t-0","t-1","t-2","t-3","t-4","t-5","t-6","t-7","t-8");
+    List<String> partitions2 = ImmutableList.of("p-0","p-1","p-2","p-3","t-0");
+    Map<String, List<String>> partitions = new HashMap<>();
+    partitions.put("datastream1", partitions1);
+    partitions.put("datastream2", partitions2);
+
+
+
+    TestHookConnector connector1 = new TestHookConnector("connector1", testConnectorType);
+    PartitionListenerFactory factory = new PartitionListenerFactory() {
+      @Override
+      public PartitionListener createPartitionListener(String clusterName, Properties config) {
+        return createMockPartitionListener(partitions, initialDelays);
+      }
+    };
+
+    //Question why the multicast strategy is within one coordinator rather than shared between list of coordinators
+    instance1.addConnector(testConnectorType, connector1, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
+        new SourceBasedDeduper(), factory, null);
+    instance1.start();
+
+    Coordinator instance2 = createCoordinator(_zkConnectionString, testCluster);
+    TestHookConnector connector2 = new TestHookConnector("connector2", testConnectorType);
+    instance2.addConnector(testConnectorType, connector2, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
+        new SourceBasedDeduper(), factory, null);
+    instance2.start();
+
+    Coordinator instance3 = createCoordinator(_zkConnectionString, testCluster);
+    TestHookConnector connector3 = new TestHookConnector("connector3", testConnectorType);
+    instance3.addConnector(testConnectorType, connector3, new StickyMulticastStrategy(Optional.of(4), Optional.of(2)), false,
+        new SourceBasedDeduper(), factory, null);
+    instance3.start();
+
+    ZkClient zkClient = new ZkClient(_zkConnectionString);
+    List<TestHookConnector> connectors = new ArrayList<>();
+    connectors.add(connector1);
+    connectors.add(connector2);
+    connectors.add(connector3);
+    List<String> datastreamNames = ImmutableList.of("datastream1", "datastream2");
+
+    for (String name : datastreamNames) {
+      DatastreamTestUtils.createAndStoreDatastreams(zkClient, testCluster, testConnectorType, name);
+    }
+    waitTillAssignmentIsComplete(8, WAIT_TIMEOUT_MS, connectors.toArray(new TestHookConnector[connectors.size()]));
+    Thread.sleep(3000);
+
+    final long interval = WAIT_TIMEOUT_MS < 100 ? WAIT_TIMEOUT_MS : 100;
+    PollUtils.poll(() -> {
+      //Verify all the partitions are assigned
+      Map<String, List<String>> assignment = collectDatastreamPartitions(connectors);
+      return assignment.get("datastream1").size() == partitions1.size() && assignment.get("datastream2").size() == partitions2.size();
+    }, interval, WAIT_TIMEOUT_MS);
+    instance1.stop();
+    instance2.stop();
+    instance3.stop();
+
+    zkClient.close();
+  }
+
+  private PartitionListener createMockPartitionListener(Map<String, List<String>> partitions, int initialDelayMs) {
+    return new PartitionListener() {
+
+      Set<String> _datastremGroups = new HashSet<>();
+      Consumer<String> _callback;
+
+      @Override
+      public void onPartitionChange(Consumer<String> callback) {
+        _callback = callback;
+
+      }
+
+      @Override
+      public void register(DatastreamGroup datastreamGroup) {
+        _datastremGroups.add(datastreamGroup.getTaskPrefix());
+        Thread callbackThread = new Thread(() -> {
+          try {
+            Thread.sleep(initialDelayMs);
+            _callback.accept(datastreamGroup.getTaskPrefix());
+          } catch (Exception ex) {
+
+          }
+        });
+        callbackThread.start();
+      }
+
+      @Override
+      public void deregister(String datastreamGroupName) {
+        _datastremGroups.remove(datastreamGroupName);
+      }
+
+      @Override
+      public Optional<List<String>> getPartitions(String datastreamGroupName) {
+        return Optional.of(partitions.get(datastreamGroupName));
+      }
+
+      @Override
+      public List<String> getRegisteredDatastreamGroups() {
+        return new ArrayList<>(_datastremGroups);
+      }
+
+      @Override
+      public void shutdown() {
+
+      }
+    };
+  }
+
+
   private Map<String, List<Connector>> collectDatastreamAssignment(List<TestHookConnector> connectors) {
     Map<String, List<Connector>> datastreamMap = new HashMap<>();
     for (TestHookConnector testHookConnector : connectors) {
@@ -582,6 +699,20 @@ public class TestCoordinator {
     }
     return datastreamMap;
   }
+
+  private Map<String, List<String>> collectDatastreamPartitions(List<TestHookConnector> connectors) {
+    Map<String, List<String>> datastreamMap = new HashMap<>();
+    for (TestHookConnector testHookConnector : connectors) {
+      testHookConnector.getTasks().stream().forEach(task -> {
+        String datastream = task.getDatastreams().get(0).getName();
+        datastreamMap.putIfAbsent(datastream, new ArrayList<>());
+        LOG.info("{}", task);
+        datastreamMap.get(datastream).addAll(task.getPartitionsV2());
+      });
+    }
+    return datastreamMap;
+  }
+
 
   /**
    * Test Datastream create with BYOT where destination is in use by another datastream
