@@ -990,7 +990,7 @@ public class ZkAdapter {
           LOG.info("Added assignment {} {}", assignment.getTargetHost(), assignment.getPartitionNames());
           result.put(hostInstanceMap.get(assignment.getTargetHost()), new HashSet<>(assignment.getPartitionNames()));
         } else {
-          LOG.warn("instance not found in the map");
+          LOG.warn("instance {} not found in the map {}", assignment.getTargetHost(), hostInstanceMap.keySet());
         }
       }
     }

@@ -43,7 +43,7 @@ public class TestDatastreamTask {
     DatastreamTaskImpl task = new DatastreamTaskImpl(Collections.singletonList(stream));
     ZkAdapter mockZkAdapter = mock(ZkAdapter.class);
     task.setZkAdapter(mockZkAdapter);
-    
+
     task.addDependentTask("task0");
     task.acquire(Duration.ofMillis(60));
     verify(mockZkAdapter, atLeastOnce()).waitForDependencies(any(DatastreamTaskImpl.class), any(Duration.class));

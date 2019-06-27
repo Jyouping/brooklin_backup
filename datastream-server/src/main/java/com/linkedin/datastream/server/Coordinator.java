@@ -972,8 +972,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
   private void performPartitionAssignment(Optional<String> datastreamGroupName) {
     boolean succeeded = false;
+    Map<String, Set<DatastreamTask>> previousAssignmentByInstance = new HashMap<>();
+    Map<String, List<DatastreamTask>> newAssignmentsByInstance = new HashMap<>();
     try {
-      Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+      previousAssignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+      Map<String, Set<DatastreamTask>> assignmentByInstance = new HashMap<>(previousAssignmentByInstance);
 
       // retrieve the datastreamGroups for validation
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
@@ -999,19 +1002,20 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       }
 
       _log.info("Partition assignment completed: datastreamGroup, assignment {} ", assignmentByInstance);
-      Map<String, List<DatastreamTask>> finalAssignment = new HashMap<>();
       for (String key : assignmentByInstance.keySet()) {
-        finalAssignment.put(key, new ArrayList<>(assignmentByInstance.get(key)));
+        newAssignmentsByInstance.put(key, new ArrayList<>(assignmentByInstance.get(key)));
       }
-
-      _adapter.updateAllAssignments(finalAssignment);
+      _adapter.updateAllAssignments(newAssignmentsByInstance);
 
       succeeded = true;
     } catch (Exception ex) {
       _log.info("Partition assignment failed, Exception: ", ex);
     }
     // schedule retry if failure
-    if (!succeeded && !leaderPartitionAssignmentScheduled.get() && datastreamGroupName.isPresent()) {
+    if (succeeded) {
+      _adapter.cleanupOldUnusedTasks(previousAssignmentByInstance, newAssignmentsByInstance);
+      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_REBALANCES, 1);
+    } else if (!leaderPartitionAssignmentScheduled.get() && datastreamGroupName.isPresent()) {
       _log.info("Schedule retry for leader assigning tasks");
       _dynamicMetricsManager.createOrUpdateMeter(MODULE, "handleLeaderPartitionAssignment", NUM_RETRIES, 1);
       leaderPartitionAssignmentScheduled.set(true);
@@ -1023,8 +1027,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   private void performPartitionMovement() {
+    boolean succeeded = false;
+    Map<String, Set<DatastreamTask>> previousAssignmentByInstance = new HashMap<>();
+    Map<String, List<DatastreamTask>> newAssignmentsByInstance = new HashMap<>();
     try {
-      Map<String, Set<DatastreamTask>> assignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+      previousAssignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+      Map<String, Set<DatastreamTask>> assignmentByInstance = new HashMap<>(previousAssignmentByInstance);
 
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
       List<String> toProcessDatastreams = _adapter.getDatastreamsNeedPartitionMovement();
@@ -1052,16 +1060,20 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       }
 
       _log.info("Partition movement completed: datastreamGroup, assignment {} ", assignmentByInstance);
-      Map<String, List<DatastreamTask>> finalAssignment = new HashMap<>();
       for (String key : assignmentByInstance.keySet()) {
-        finalAssignment.put(key, new ArrayList<>(assignmentByInstance.get(key)));
+        newAssignmentsByInstance.put(key, new ArrayList<>(assignmentByInstance.get(key)));
       }
+      _adapter.updateAllAssignments(newAssignmentsByInstance);
 
+      succeeded = true;
 
-      _adapter.updateAllAssignments(finalAssignment);
     } catch (Exception ex) {
       //We don't retry if there is any exceptions
       _log.info("Partition movement failed, Exception: ", ex);
+    }
+    if (succeeded) {
+      _adapter.cleanupOldUnusedTasks(previousAssignmentByInstance, newAssignmentsByInstance);
+      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_REBALANCES, 1);
     }
   }
 

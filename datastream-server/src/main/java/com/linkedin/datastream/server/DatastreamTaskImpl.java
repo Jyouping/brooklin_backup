@@ -146,14 +146,19 @@ public class DatastreamTaskImpl implements DatastreamTask {
 
   /**
    * Constructor for new DatastreamTaskImpl which inherits some partitions from previous Task
+   * We must generate a new UUID for task
    * @param dependentTask task which need to release the partitions
    * @param partitionsV2 new partitions for this task
    */
   public DatastreamTaskImpl(DatastreamTaskImpl dependentTask, Collection<String> partitionsV2) {
-    this(dependentTask.getDatastreams());
-
+    _datastreams = dependentTask._datastreams;
+    _taskPrefix = dependentTask._taskPrefix;
+    _connectorType = dependentTask._connectorType;
+    _id = UUID.randomUUID().toString();
+    _transportProviderName = dependentTask._transportProviderName;
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>(partitionsV2);
+
     _zkAdapter = dependentTask._zkAdapter;
     _eventProducer = dependentTask._eventProducer;
     _checkpoints = dependentTask._checkpoints;

@@ -165,7 +165,7 @@ public class KafkaTopicPartitionListener implements PartitionListener {
         try {
           // If partition is changed
           List<String> newPartitionInfo = getPartitionsInfo();
-          _log.debug("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
+          _log.info("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
               , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
 
           if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
