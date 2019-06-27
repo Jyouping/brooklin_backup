@@ -33,7 +33,7 @@ import static org.mockito.Mockito.mock;
 
 
 /**
- * Tests for {@link TestStickyPartitionAssignment}
+ * Tests for {@link StickyPartitionAssignmentStrategy}
  */
 public class TestStickyPartitionAssignment {
 

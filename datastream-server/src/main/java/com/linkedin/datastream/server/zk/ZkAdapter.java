@@ -1014,12 +1014,6 @@ public class ZkAdapter {
     task.getDependentTasks().stream().forEach(previousTask -> {
         String lockPath = KeyBuilder.datastreamTaskLock(_cluster, task.getConnectorType(), previousTask);
       if (_zkclient.exists(lockPath)) {
-        String owner = _zkclient.ensureReadData(lockPath);
-        if (owner.equals(_instanceName)) {
-          LOG.info("{} already owns the lock on {}", _instanceName, task);
-          _zkclient.delete(lockPath);
-          LOG.info("{} successfully released the lock on {}", _instanceName, task);
-        }
         waitForTaskRelease(task, timeout.toMillis(), lockPath);
       }
     });

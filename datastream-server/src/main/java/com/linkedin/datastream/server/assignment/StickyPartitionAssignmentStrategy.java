@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,7 +55,8 @@ public class StickyPartitionAssignmentStrategy {
     List<String> unassignedPartitions = new ArrayList<>(allPartitions);
     unassignedPartitions.removeAll(assignedPartitions);
 
-    int maxPartitionPerTask = (int) Math.ceil((double) allPartitions.size() / (double) totalTaskCount);
+    int maxPartitionPerTask = allPartitions.size() / totalTaskCount;
+    final AtomicInteger remainder = new AtomicInteger(allPartitions.size() % totalTaskCount);
     LOG.info("maxPartitionPerTask {}, task count {}", maxPartitionPerTask, totalTaskCount);
 
     Collections.shuffle(unassignedPartitions);
@@ -73,9 +75,15 @@ public class StickyPartitionAssignmentStrategy {
           //We need to create new task if the partition is changed
           boolean partitionChanged = partitions.size() != task.getPartitionsV2().size();
 
-          while (partitions.size() < maxPartitionPerTask && unassignedPartitions.size() > 0) {
+          int allowedPartitions = remainder.get() > 0 ? maxPartitionPerTask + 1 : maxPartitionPerTask;
+
+          while (partitions.size() < allowedPartitions && unassignedPartitions.size() > 0) {
             partitions.add(unassignedPartitions.remove(unassignedPartitions.size() - 1));
             partitionChanged = true;
+          }
+
+          if (remainder.get() > 0) {
+            remainder.decrementAndGet();
           }
 
           if (partitionChanged) {

@@ -283,7 +283,6 @@ public class DatastreamTaskImpl implements DatastreamTask {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     if (!_dependentTasks.isEmpty()) {
       _zkAdapter.waitForDependencies(this, timeout);
-      _dependentTasks.clear();
     }
     try {
       _zkAdapter.acquireTask(this, timeout);
