@@ -19,7 +19,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.DatastreamRuntimeException;
-import com.linkedin.datastream.server.DatastreamGroup;
 import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.DatastreamTaskImpl;
 
@@ -34,12 +33,12 @@ public class StickyPartitionAssignmentStrategy {
   /**
    * assign partitions to a particular datastream group
    *
-   * @param dg datastream group which needs the partition assignment
+   * @param dgName datastream group name which needs the partition assignment
    * @param currentAssignment the old assignment
    * @param allPartitions the subscribed partitions received from partition listener
    * @return new assignment mapping
    */
-  public Map<String, Set<DatastreamTask>> assignPartitions(DatastreamGroup dg, Map<String,
+  public Map<String, Set<DatastreamTask>> assignPartitions(String dgName, Map<String,
       Set<DatastreamTask>> currentAssignment, List<String> allPartitions) {
 
     LOG.info("old partition assignment info, assignment: {}", currentAssignment);
@@ -47,7 +46,7 @@ public class StickyPartitionAssignmentStrategy {
     List<String> assignedPartitions = new ArrayList<>();
     int totalTaskCount = 0;
     for (Set<DatastreamTask> tasks : currentAssignment.values()) {
-      Set<DatastreamTask> dgTask = tasks.stream().filter(dg::belongsTo).collect(Collectors.toSet());
+      Set<DatastreamTask> dgTask = tasks.stream().filter(t -> dgName.equals(t.getTaskPrefix())).collect(Collectors.toSet());
       dgTask.stream().forEach(t -> assignedPartitions.addAll(t.getPartitionsV2()));
       totalTaskCount += dgTask.size();
     }
@@ -66,7 +65,7 @@ public class StickyPartitionAssignmentStrategy {
     currentAssignment.keySet().stream().forEach(instance -> {
       Set<DatastreamTask> tasks = currentAssignment.get(instance);
       Set<DatastreamTask> newAssignedTask = tasks.stream().map(task -> {
-        if (!dg.belongsTo(task)) {
+        if (!dgName.equals(task.getTaskPrefix())) {
           return task;
         } else {
           Set<String> partitions = new HashSet<>(task.getPartitionsV2());
@@ -97,20 +96,20 @@ public class StickyPartitionAssignmentStrategy {
     });
     LOG.info("new assignment info, assignment: {}, all partitions: {}", newAssignment, allPartitions);
 
-    sanityChecks(dg.getTaskPrefix(), newAssignment, allPartitions);
+    sanityChecks(dgName, newAssignment, allPartitions);
     return newAssignment;
   }
 
   /**
    * Move a partition for a datastream group according to the suggestAssignment
    *
-   * @param dg datastream group which needs the partition movement
+   * @param dgName datastream group which needs the partition movement
    * @param currentAssignment the old assignment
    * @param targetAssignment the target assignment retrieved from Zookeeper
    * @param allPartitions the subscribed partitions received from partition listener
    * @return new assignment
    */
-  public Map<String, Set<DatastreamTask>> movePartitions(DatastreamGroup dg,
+  public Map<String, Set<DatastreamTask>> movePartitions(String dgName,
       Map<String, Set<DatastreamTask>> currentAssignment,
       Map<String, Set<String>> targetAssignment, List<String> allPartitions) {
 
@@ -130,7 +129,7 @@ public class StickyPartitionAssignmentStrategy {
     newAssignment.keySet().stream().forEach(instance -> {
       Set<DatastreamTask> prevTasks = currentAssignment.get(instance);
       Set<DatastreamTask> newTasks = prevTasks.stream().map(task -> {
-        if (!dg.belongsTo(task)) {
+        if (!dgName.equals(task.getTaskPrefix())) {
           return task;
         }
         Set<String> movedPartitions = new HashSet<>(task.getPartitionsV2());
@@ -156,7 +155,7 @@ public class StickyPartitionAssignmentStrategy {
 
       Optional<DatastreamTask> toAssignTask;
       if (newAssignment.containsKey(inst)) {
-        Set<DatastreamTask> dgTasks = newAssignment.get(inst).stream().filter(dg::belongsTo)
+        Set<DatastreamTask> dgTasks = newAssignment.get(inst).stream().filter(t -> dgName.equals(t.getTaskPrefix()))
             .collect(Collectors.toSet());
         toAssignTask = dgTasks.stream().reduce((task1, task2) ->
             task1.getPartitionsV2().size() < task2.getPartitionsV2().size() ? task1 : task2);
@@ -174,7 +173,7 @@ public class StickyPartitionAssignmentStrategy {
       newAssignment.get(inst).add(newTask);
     });
 
-    sanityChecks(dg.getTaskPrefix(), newAssignment, allPartitions);
+    sanityChecks(dgName, newAssignment, allPartitions);
     LOG.info("assignment info, task: {}", newAssignment);
     return newAssignment;
   }

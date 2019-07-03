@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server;
 
+import com.linkedin.datastream.server.api.connector.PartitionListenerFactory;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;

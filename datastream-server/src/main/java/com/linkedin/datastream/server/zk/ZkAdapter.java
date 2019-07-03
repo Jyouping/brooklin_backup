@@ -949,7 +949,7 @@ public class ZkAdapter {
   }
 
   /**
-   * Get the datastream group which contains the parition movement info
+   * Get the datastream group which contains the partition movement info
    * @return
    */
   public List<String> getDatastreamsNeedPartitionMovement() {

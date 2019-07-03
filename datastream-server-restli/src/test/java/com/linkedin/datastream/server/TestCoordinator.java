@@ -6,7 +6,6 @@
 package com.linkedin.datastream.server;
 
 import java.io.IOException;
-import java.net.Proxy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,6 +48,8 @@ import com.linkedin.datastream.common.PollUtils;
 import com.linkedin.datastream.common.ReflectionUtils;
 import com.linkedin.datastream.common.zk.ZkClient;
 import com.linkedin.datastream.connectors.DummyConnector;
+import com.linkedin.datastream.server.api.connector.PartitionListener;
+import com.linkedin.datastream.server.api.connector.PartitionListenerFactory;
 import com.linkedin.datastream.kafka.KafkaDestination;
 import com.linkedin.datastream.kafka.KafkaTransportProviderAdmin;
 import com.linkedin.datastream.metrics.BrooklinMetricInfo;
@@ -642,6 +643,7 @@ public class TestCoordinator {
 
       Set<String> _datastremGroups = new HashSet<>();
       Consumer<String> _callback;
+      Thread _callbackThread = null;
 
       @Override
       public void onPartitionChange(Consumer<String> callback) {
@@ -650,37 +652,30 @@ public class TestCoordinator {
       }
 
       @Override
-      public void register(DatastreamGroup datastreamGroup) {
-        _datastremGroups.add(datastreamGroup.getTaskPrefix());
-        Thread callbackThread = new Thread(() -> {
+      public void onDatastreamChanged(List<DatastreamGroup> datastreamGroup) {
+        datastreamGroup.stream().map(DatastreamGroup::getTaskPrefix).forEach(_datastremGroups::add);
+        _callbackThread = new Thread(() -> {
           try {
             Thread.sleep(initialDelayMs);
-            _callback.accept(datastreamGroup.getTaskPrefix());
+            _callback.accept(datastreamGroup.get(0).getTaskPrefix());
           } catch (Exception ex) {
 
           }
         });
-        callbackThread.start();
+        _callbackThread.start();
       }
 
-      @Override
-      public void deregister(String datastreamGroupName) {
-        _datastremGroups.remove(datastreamGroupName);
-      }
 
       @Override
-      public Optional<List<String>> getPartitions(String datastreamGroupName) {
-        return Optional.of(partitions.get(datastreamGroupName));
-      }
-
-      @Override
-      public List<String> getRegisteredDatastreamGroups() {
-        return new ArrayList<>(_datastremGroups);
+      public Map<String, Optional<List<String>>> getDatastreamPartitions() {
+        return partitions.keySet().stream().collect(Collectors.toMap(k -> k, k -> Optional.of(partitions.get(k))));
       }
 
       @Override
       public void shutdown() {
-
+        if (_callbackThread != null) {
+          _callbackThread.interrupt();
+        }
       }
     };
   }

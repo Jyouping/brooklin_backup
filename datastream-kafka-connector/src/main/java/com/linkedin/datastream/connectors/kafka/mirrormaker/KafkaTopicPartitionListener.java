@@ -29,7 +29,7 @@ import com.linkedin.datastream.connectors.kafka.KafkaBrokerAddress;
 import com.linkedin.datastream.connectors.kafka.KafkaConnectionString;
 import com.linkedin.datastream.connectors.kafka.KafkaConsumerFactory;
 import com.linkedin.datastream.server.DatastreamGroup;
-import com.linkedin.datastream.server.PartitionListener;
+import com.linkedin.datastream.server.api.connector.PartitionListener;
 
 /**
  * A partition listener to listen change from Kafka
@@ -72,41 +72,45 @@ public class KafkaTopicPartitionListener implements PartitionListener {
   }
 
   @Override
-  public Optional<List<String>> getPartitions(String datastreamGroupName) {
-    if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
-      if (_partitionDiscoveryThreadMap.get(datastreamGroupName)._initialized) {
-        return Optional.of(Collections.unmodifiableList(_partitionDiscoveryThreadMap.get(datastreamGroupName)._subscribedPartitions));
+  public Map<String, Optional<List<String>>> getDatastreamPartitions() {
+    Map<String, Optional<List<String>>> datastreams = new HashMap<>();
+    _partitionDiscoveryThreadMap.forEach((s, partitionDiscoveryThread) -> {
+      if (partitionDiscoveryThread._initialized) {
+        datastreams.put(s, Optional.of(Collections.unmodifiableList(partitionDiscoveryThread._subscribedPartitions));
+      } else {
+        datastreams.put(s, Optional.empty());
       }
-    }
-    return Optional.empty();
+    });
   }
 
 
   @Override
-  public void deregister(String datastreamGroupName) {
-    _log.info("attempted to deregister datastream group {}", datastreamGroupName);
+  public void onDatastreamChanged(List<DatastreamGroup> datastreamGroups) {
+    // Remove obsolete datastreams
+    List<String> dgNames = datastreamGroups.stream().map(DatastreamGroup::getTaskPrefix).collect(Collectors.toList());
+    List<String> obsoleteDgs = new ArrayList<>(_partitionDiscoveryThreadMap.keySet());
+    obsoleteDgs.removeAll(dgNames);
+    obsoleteDgs.stream().forEach(name -> {
+      _log.info("remove datastream group {}", name);
+      Optional.ofNullable(_partitionDiscoveryThreadMap.remove(name)).ifPresent(Thread::interrupt);
+    });
 
-    Optional.ofNullable(_partitionDiscoveryThreadMap.remove(datastreamGroupName)).ifPresent(Thread::interrupt);
-  }
-
-  public List<String> getRegisteredDatastreamGroups() {
-    return new ArrayList<>(_partitionDiscoveryThreadMap.keySet());
-  }
-
-
-  @Override
-  public void register(DatastreamGroup datastreamGroup) {
-    String datastreamGroupName = datastreamGroup.getTaskPrefix();
-    if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
-      _partitionDiscoveryThreadMap.get(datastreamGroupName).setDatastream(datastreamGroup.getDatastreams().get(0));
-    } else {
-      PartitionDiscoveryThread partitionDiscoveryThread =
-          new PartitionDiscoveryThread(datastreamGroup.getTaskPrefix(), datastreamGroup.getDatastreams().get(0));
-      partitionDiscoveryThread.start();
-      _partitionDiscoveryThreadMap.put(datastreamGroupName, partitionDiscoveryThread);
-        _log.info("PartitionListener for {} registered", datastreamGroupName);
-    }
-    _log.info("initial subscribed partitions {}", getPartitions(datastreamGroupName));
+    // add new datatreams
+    datastreamGroups.stream().forEach(datastreamGroup -> {
+      String datastreamGroupName = datastreamGroup.getTaskPrefix();
+      PartitionDiscoveryThread partitionDiscoveryThread;
+      if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
+        partitionDiscoveryThread = _partitionDiscoveryThreadMap.get(datastreamGroupName);
+        partitionDiscoveryThread.setDatastream(datastreamGroup.getDatastreams().get(0));
+      } else {
+        partitionDiscoveryThread =
+            new PartitionDiscoveryThread(datastreamGroup.getTaskPrefix(), datastreamGroup.getDatastreams().get(0));
+        partitionDiscoveryThread.start();
+        _partitionDiscoveryThreadMap.put(datastreamGroupName, partitionDiscoveryThread);
+          _log.info("PartitionListener for {} registered", datastreamGroupName);
+      }
+      _log.info("initial subscribed partitions {}", partitionDiscoveryThread._subscribedPartitions);
+    });
   }
 
   private Consumer<?, ?> createConsumer(Properties consumerProps, String bootstrapServers, String groupId) {

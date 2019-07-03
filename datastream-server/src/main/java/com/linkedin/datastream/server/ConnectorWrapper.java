@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server;
 
+import com.linkedin.datastream.server.api.connector.PartitionListener;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 

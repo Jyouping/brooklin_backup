@@ -8,8 +8,8 @@ package com.linkedin.datastream.connectors.kafka.mirrormaker;
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.connectors.kafka.GroupIdConstructor;
 import com.linkedin.datastream.connectors.kafka.KafkaConsumerFactoryImpl;
-import com.linkedin.datastream.server.PartitionListenerFactory;
-import com.linkedin.datastream.server.PartitionListener;
+import com.linkedin.datastream.server.api.connector.PartitionListenerFactory;
+import com.linkedin.datastream.server.api.connector.PartitionListener;
 import java.util.Properties;
 
 /**

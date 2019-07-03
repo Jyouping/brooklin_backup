@@ -49,7 +49,7 @@ public class TestStickyPartitionAssignment {
 
     List<String> partitions = ImmutableList.of("t-0", "t-1", "t1-0");
 
-    assignment = strategy.assignPartitions(datastreams.get(0), assignment, partitions);
+    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, partitions);
 
     for (DatastreamTask task : assignment.get("instance1")) {
       Assert.assertEquals(task.getPartitionsV2().size(), 1);
@@ -64,13 +64,13 @@ public class TestStickyPartitionAssignment {
     List<String> partitions = ImmutableList.of("t-0", "t-1", "t-2", "t-3", "t-4");
 
     // Generate partition assignment
-    assignment = strategy.assignPartitions(datastreams.get(0), assignment, partitions);
+    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, partitions);
 
     Map<String, Set<String>> targetAssignment = new HashMap<>();
     targetAssignment.put("instance2", ImmutableSet.of("t-3", "t-2", "t-1", "t-5"));
     targetAssignment.put("instance1", ImmutableSet.of("t-0"));
 
-    assignment = strategy.movePartitions(datastreams.get(0), assignment, targetAssignment, partitions);
+    assignment = strategy.movePartitions(datastreams.get(0).getTaskPrefix(), assignment, targetAssignment, partitions);
 
     Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-1"));
     Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-2"));
@@ -90,11 +90,11 @@ public class TestStickyPartitionAssignment {
     List<String> partitions = ImmutableList.of("t-0", "t-1", "t-2", "t-3", "t-4", "t-5", "t-6");
 
     // Generate partition assignment
-    assignment = strategy.assignPartitions(datastreams.get(0), assignment, partitions);
+    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, partitions);
 
     List<String> newPartitions = ImmutableList.of("t-1", "t-3", "t-4", "t-6");
 
-    assignment = strategy.assignPartitions(datastreams.get(0), assignment, newPartitions);
+    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, newPartitions);
 
     List<String> remainingPartitions = new ArrayList<>();
     for(String instance : assignment.keySet()) {
