@@ -5,7 +5,6 @@
  */
 package com.linkedin.datastream.server;
 
-import com.linkedin.datastream.server.api.connector.PartitionListener;
 import java.util.Optional;
 
 import org.apache.commons.lang.StringUtils;
@@ -45,13 +44,11 @@ public class ConnectorInfo {
    * @param customCheckpointing true if {@code connector} uses custom checkpointing
    * @param checkpointProvider Checkpoint provider associated with {@code connector}
    * @param deduper Datastream deduper associated with {@code connector}
-   * @param partitionListener partition listener associated with {@code connector}
    * @param authorizerName Name of the authorizer configured by {@code connector} (if any)
    */
   public ConnectorInfo(String name, Connector connector, AssignmentStrategy strategy, boolean customCheckpointing,
-      CheckpointProvider checkpointProvider, DatastreamDeduper deduper,
-      PartitionListener partitionListener, String authorizerName) {
-    _connector = new ConnectorWrapper(name, connector, partitionListener);
+      CheckpointProvider checkpointProvider, DatastreamDeduper deduper, String authorizerName) {
+    _connector = new ConnectorWrapper(name, connector);
     _assignmentStrategy = strategy;
     _customCheckpointing = customCheckpointing;
     _datastreamDeduper = deduper;

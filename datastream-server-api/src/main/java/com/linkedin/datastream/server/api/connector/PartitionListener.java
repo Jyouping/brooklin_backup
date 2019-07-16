@@ -22,20 +22,20 @@ import com.linkedin.datastream.server.DatastreamGroup;
 public interface PartitionListener {
 
   /**
-   * register the consumer function which is triggered when a partition change is detected for the datastream
+   * register a consumer function which will be triggered when a partition change is detected within this connector
    *
-   * The callback function is a lamda consumer takes the name of datastream group as a consumer. It is expected to
+   * The callback function is a lambda consumer takes the name of datastream group as a consumer. It is expected to
    * be issued in the same thread that detecting the partition changed. Thus we expect this callback function to
    * be finished very quickly
    *
    * @param callback a lamda consumer which takes the name of datastream group
    */
-  default void onPartitionChange(Consumer<String> callback) {
+  default void subscribePartitionChange(Consumer<String> callback) {
 
   }
 
   /**
-   * callback when the datastreamGroup to this listener instance has been changed
+   * callback when the datastreamGroup to this connector instance has been changed
    */
   default void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
 
@@ -48,9 +48,4 @@ public interface PartitionListener {
   default Map<String, Optional<DatastreamPartitionsMetadata>> getDatastreamPartitions() {
     return new HashMap<String, Optional<DatastreamPartitionsMetadata>>();
   }
-
-  /**
-   * Shut down the partition listener
-   */
-  void shutdown();
 }

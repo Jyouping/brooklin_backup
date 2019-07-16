@@ -163,7 +163,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     Coordinator coordinator =
         TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(), "testPopulateDatastreamDestination");
     coordinator.addConnector("KafkaMirrorMaker", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null, null);
+        new SourceBasedDeduper(),  null, false);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);
@@ -196,7 +196,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     Coordinator coordinator = TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(),
         "testValidateDatastreamUpdatePausedPartitions");
     coordinator.addConnector("KafkaMirrorMaker", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null, null);
+        new SourceBasedDeduper(),  null, false);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);
@@ -592,7 +592,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     KafkaMirrorMakerConnector connector = new KafkaMirrorMakerConnector("MirrorMakerConnector", config, clusterName);
     Coordinator coordinator = TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(), clusterName);
     coordinator.addConnector("KafkaMirrorMaker", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null, null);
+        new SourceBasedDeduper(), null, false);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);

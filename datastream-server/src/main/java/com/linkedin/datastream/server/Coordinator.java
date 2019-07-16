@@ -63,8 +63,6 @@ import com.linkedin.datastream.serde.SerDeSet;
 import com.linkedin.datastream.server.api.connector.Connector;
 import com.linkedin.datastream.server.api.connector.DatastreamDeduper;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
-import com.linkedin.datastream.server.api.connector.PartitionListener;
-import com.linkedin.datastream.server.api.connector.PartitionListenerFactory;
 import com.linkedin.datastream.server.api.security.AuthorizationException;
 import com.linkedin.datastream.server.api.security.Authorizer;
 import com.linkedin.datastream.server.api.serde.SerdeAdmin;
@@ -988,21 +986,19 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       StickyPartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
 
       for (String connectorType : _connectors.keySet()) {
-        PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
-        if (partitionListener != null) {
-          Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
-              partitionListener.getDatastreamPartitions();
+        Connector connectorInstance = _connectors.get(connectorType).getConnector().getConnectorInstance();
+        Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
+            connectorInstance.getDatastreamPartitions();
 
-          //if the datastreamGroupName is specified, we process for that datastream only
-          datastreamGroups.retainAll(datastreamPartitions.keySet());
-          datastreamGroupName.ifPresent(dg -> datastreamGroups.retainAll(ImmutableList.of(dg)));
-          for (String dgName : datastreamGroups) {
-            DatastreamPartitionsMetadata subscribes = partitionListener.getDatastreamPartitions().get(dgName)
-                .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
-            assignmentByInstance = partitionAssignmentStrategy.assignPartitions(assignmentByInstance, subscribes);
-          }
+        //if the datastreamGroupName is specified, we process for that datastream only
+        datastreamGroups.retainAll(datastreamPartitions.keySet());
+        datastreamGroupName.ifPresent(dg -> datastreamGroups.retainAll(ImmutableList.of(dg)));
+        for (String dgName : datastreamGroups) {
+          DatastreamPartitionsMetadata subscribes = connectorInstance.getDatastreamPartitions().get(dgName)
+              .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
+          assignmentByInstance = partitionAssignmentStrategy.assignPartitions(assignmentByInstance, subscribes);
         }
-      }
+    }
 
       _log.info("Partition assignment completed: datastreamGroup, assignment {} ", assignmentByInstance);
       for (String key : assignmentByInstance.keySet()) {
@@ -1046,25 +1042,22 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       StickyPartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
 
       for (String connectorType : _connectors.keySet()) {
-        PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
-        if (partitionListener != null) {
+        Connector connectorInstance = _connectors.get(connectorType).getConnector().getConnectorInstance();
+        Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
+            connectorInstance.getDatastreamPartitions();
 
-          Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
-              partitionListener.getDatastreamPartitions();
+        datastreamGroups.retainAll(datastreamPartitions.keySet());
+        //Processed datastream with assignment info only
+        datastreamGroups.retainAll(toProcessDatastreams);
 
-          datastreamGroups.retainAll(datastreamPartitions.keySet());
-          //Processed datastream with assignment info only
-          datastreamGroups.retainAll(toProcessDatastreams);
+        for (String dgName : datastreamGroups) {
 
-          for (String dgName : datastreamGroups) {
-
-            DatastreamPartitionsMetadata subscribedPartitions = partitionListener.getDatastreamPartitions().get(dgName)
-                .orElseThrow(() -> new RuntimeException("partition listener is not ready yet for datastream " + dgName));
-            Map<String, Set<String>> suggestedAssignment = _adapter.getPartitionMovement(dgName);
-             assignmentByInstance = partitionAssignmentStrategy.movePartitions(assignmentByInstance,
-                 suggestedAssignment, subscribedPartitions);
-            _adapter.cleanUpPartitionMovement(dgName);
-          }
+          DatastreamPartitionsMetadata subscribedPartitions = connectorInstance.getDatastreamPartitions().get(dgName)
+              .orElseThrow(() -> new RuntimeException("partition listener is not ready yet for datastream " + dgName));
+          Map<String, Set<String>> suggestedAssignment = _adapter.getPartitionMovement(dgName);
+           assignmentByInstance = partitionAssignmentStrategy.movePartitions(assignmentByInstance,
+               suggestedAssignment, subscribedPartitions);
+          _adapter.cleanUpPartitionMovement(dgName);
         }
       }
 
@@ -1092,16 +1085,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
     for (String connectorType : _connectors.keySet()) {
       ConnectorWrapper connectorWrapper = _connectors.get(connectorType).getConnector();
-      PartitionListener partitionListener = connectorWrapper.getPartitionListener();
-      if (partitionListener == null) {
-        continue;
-      }
 
       List<DatastreamGroup> datastreamsPerConnectorType = activeDataStreams.stream()
           .filter(x -> x.getConnectorName().equals(connectorType))
           .collect(Collectors.toList());
 
-      connectorWrapper.getPartitionListener().onDatastreamChange(datastreamsPerConnectorType);
+      connectorWrapper.getConnectorInstance().onDatastreamChange(datastreamsPerConnectorType);
     }
   }
 
@@ -1188,13 +1177,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
    * @param customCheckpointing whether connector uses custom checkpointing. if the custom checkpointing is set to true
    *                            Coordinator will not perform checkpointing to ZooKeeper.
    * @param deduper the deduper used by connector
-   * @param partitionListenerFactory the partition listener factory used by connector
-   * @param authorizerName name of the authorizer configured by connector
+   * @param authorizerName name of the authorizer configured by connector@
+   * @param enablePartitionAssignment enable partition assignment for this connecot or not
    *
    */
   public void addConnector(String connectorName, Connector connector, AssignmentStrategy strategy,
-      boolean customCheckpointing, DatastreamDeduper deduper, PartitionListenerFactory partitionListenerFactory,
-      String authorizerName) {
+      boolean customCheckpointing, DatastreamDeduper deduper, String authorizerName, boolean enablePartitionAssignment) {
     Validate.notNull(strategy, "strategy cannot be null");
     Validate.notEmpty(connectorName, "connectorName cannot be empty");
     Validate.notNull(connector, "Connector cannot be null");
@@ -1211,17 +1199,15 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     Optional<List<BrooklinMetricInfo>> connectorMetrics = Optional.ofNullable(connector.getMetricInfos());
     connectorMetrics.ifPresent(_metrics::addAll);
 
-    PartitionListener partitionListener = null;
-    if (partitionListenerFactory != null) {
-      partitionListener = partitionListenerFactory.createPartitionListener(_clusterName, _config.getConfigProperties());
-      partitionListener.onPartitionChange(datastreamGroupName -> {
-        _eventQueue.put(CoordinatorEvent.createLeaderPartitionAssignmentEvent(datastreamGroupName));
-      });
+
+    if (enablePartitionAssignment) {
+      connector.subscribePartitionChange(datastreamGroupName ->
+        _eventQueue.put(CoordinatorEvent.createLeaderPartitionAssignmentEvent(datastreamGroupName))
+      );
     }
 
     ConnectorInfo connectorInfo =
-        new ConnectorInfo(connectorName, connector, strategy, customCheckpointing, _cpProvider, deduper,
-            partitionListener, authorizerName);
+        new ConnectorInfo(connectorName, connector, strategy, customCheckpointing, _cpProvider, deduper, authorizerName);
     _connectors.put(connectorName, connectorInfo);
 
     // Register common connector metrics
