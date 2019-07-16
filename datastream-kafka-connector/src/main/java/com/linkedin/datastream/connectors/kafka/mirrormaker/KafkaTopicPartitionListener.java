@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.Datastream;
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import com.linkedin.datastream.connectors.kafka.GroupIdConstructor;
 import com.linkedin.datastream.connectors.kafka.KafkaBrokerAddress;
 import com.linkedin.datastream.connectors.kafka.KafkaConnectionString;
@@ -72,20 +73,22 @@ public class KafkaTopicPartitionListener implements PartitionListener {
   }
 
   @Override
-  public Map<String, Optional<List<String>>> getDatastreamPartitions() {
-    Map<String, Optional<List<String>>> datastreams = new HashMap<>();
+  public Map<String, Optional<DatastreamPartitionsMetadata>> getDatastreamPartitions() {
+    Map<String, Optional<DatastreamPartitionsMetadata>> datastreams = new HashMap<>();
     _partitionDiscoveryThreadMap.forEach((s, partitionDiscoveryThread) -> {
       if (partitionDiscoveryThread._initialized) {
-        datastreams.put(s, Optional.of(Collections.unmodifiableList(partitionDiscoveryThread._subscribedPartitions));
+        datastreams.put(s, Optional.of(new DatastreamPartitionsMetadata(s,
+            partitionDiscoveryThread._subscribedPartitions)));
       } else {
         datastreams.put(s, Optional.empty());
       }
     });
+    return new HashMap<>();
   }
 
 
   @Override
-  public void onDatastreamChanged(List<DatastreamGroup> datastreamGroups) {
+  public void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
     // Remove obsolete datastreams
     List<String> dgNames = datastreamGroups.stream().map(DatastreamGroup::getTaskPrefix).collect(Collectors.toList());
     List<String> obsoleteDgs = new ArrayList<>(_partitionDiscoveryThreadMap.keySet());

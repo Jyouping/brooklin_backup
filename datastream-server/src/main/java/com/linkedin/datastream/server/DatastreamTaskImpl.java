@@ -52,6 +52,7 @@ import com.linkedin.datastream.server.zk.ZkAdapter;
 public class DatastreamTaskImpl implements DatastreamTask {
 
   private static final Logger LOG = LoggerFactory.getLogger(DatastreamTask.class.getName());
+  private static final int MAX_PARTITION_NUM = 2500;
 
   private static final String STATUS = "STATUS";
   private volatile List<Datastream> _datastreams;
@@ -92,7 +93,6 @@ public class DatastreamTaskImpl implements DatastreamTask {
    */
   @TestOnly
   public DatastreamTaskImpl() {
-    _id = UUID.randomUUID().toString();
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>();
     _dependentTasks = new ArrayList<>();
@@ -151,6 +151,8 @@ public class DatastreamTaskImpl implements DatastreamTask {
    * @param partitionsV2 new partitions for this task
    */
   public DatastreamTaskImpl(DatastreamTaskImpl dependentTask, Collection<String> partitionsV2) {
+    Validate.isTrue(partitionsV2.size() <= MAX_PARTITION_NUM, "Too many partitions allocated for a single task");
+
     _datastreams = dependentTask._datastreams;
     _taskPrefix = dependentTask._taskPrefix;
     _connectorType = dependentTask._connectorType;
@@ -301,6 +303,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   /**
    * check if task has acquired lock
    */
+  @JsonIgnore
   public boolean isLocked() {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
     return _zkAdapter.checkIfTaskLocked(_connectorType, getDatastreamTaskName());

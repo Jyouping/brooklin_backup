@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server;
 
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -579,8 +580,8 @@ public class TestCoordinator {
 
     int initialDelays = 1000;
 
-    List<String> partitions1 = ImmutableList.of("t-0","t-1","t-2","t-3","t-4","t-5","t-6","t-7","t-8");
-    List<String> partitions2 = ImmutableList.of("p-0","p-1","p-2","p-3","t-0");
+    List<String> partitions1 = ImmutableList.of("t-0", "t-1", "t-2", "t-3", "t-4", "t-5", "t-6", "t-7", "t-8");
+    List<String> partitions2 = ImmutableList.of("p-0", "p-1", "p-2", "p-3", "t-0");
     Map<String, List<String>> partitions = new HashMap<>();
     partitions.put("datastream1", partitions1);
     partitions.put("datastream2", partitions2);
@@ -652,7 +653,7 @@ public class TestCoordinator {
       }
 
       @Override
-      public void onDatastreamChanged(List<DatastreamGroup> datastreamGroup) {
+      public void onDatastreamChange(List<DatastreamGroup> datastreamGroup) {
         datastreamGroup.stream().map(DatastreamGroup::getTaskPrefix).forEach(_datastremGroups::add);
         _callbackThread = new Thread(() -> {
           try {
@@ -667,8 +668,9 @@ public class TestCoordinator {
 
 
       @Override
-      public Map<String, Optional<List<String>>> getDatastreamPartitions() {
-        return partitions.keySet().stream().collect(Collectors.toMap(k -> k, k -> Optional.of(partitions.get(k))));
+      public Map<String, Optional<DatastreamPartitionsMetadata>> getDatastreamPartitions() {
+        return partitions.keySet().stream().collect(Collectors.toMap(k -> k,
+            k -> Optional.of(new DatastreamPartitionsMetadata(k, partitions.get(k)))));
       }
 
       @Override

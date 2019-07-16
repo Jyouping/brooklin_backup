@@ -690,12 +690,6 @@ public class ZkAdapter {
   }
 
   /**
-   * Update the change in assignedTask to zookeeper, i.e. update the znode content, but not path
-   */
-  public void updateAssignedTasks(Map<String, Set<DatastreamTask>> newAssignmentInfo) {
-    newAssignmentInfo.forEach((k, v) -> v.stream().forEach(task -> updateTaskNode(k, (DatastreamTaskImpl) task)));
-  }
-  /**
    * Compare the current assignment with the new assignment, and update the list of nodes
    * to add and remove per instance.
    */

@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import com.linkedin.datastream.connectors.DummyConnector;
 import com.linkedin.datastream.server.DatastreamGroup;
 import com.linkedin.datastream.server.DatastreamTask;
@@ -49,7 +50,10 @@ public class TestStickyPartitionAssignment {
 
     List<String> partitions = ImmutableList.of("t-0", "t-1", "t1-0");
 
-    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, partitions);
+    DatastreamPartitionsMetadata partitionsMetadata =
+        new DatastreamPartitionsMetadata(datastreams.get(0).getTaskPrefix(), partitions);
+
+    assignment = strategy.assignPartitions(assignment, partitionsMetadata);
 
     for (DatastreamTask task : assignment.get("instance1")) {
       Assert.assertEquals(task.getPartitionsV2().size(), 1);
@@ -62,15 +66,17 @@ public class TestStickyPartitionAssignment {
     List<DatastreamGroup> datastreams = generateDatastreams("ds", 1);
     Map<String, Set<DatastreamTask>> assignment = generateEmptyAssignment(datastreams, 3, 2);
     List<String> partitions = ImmutableList.of("t-0", "t-1", "t-2", "t-3", "t-4");
-
+    DatastreamPartitionsMetadata partitionsMetadata =
+        new DatastreamPartitionsMetadata(datastreams.get(0).getTaskPrefix(), partitions);
     // Generate partition assignment
-    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, partitions);
+    assignment = strategy.assignPartitions(assignment, partitionsMetadata);
+
 
     Map<String, Set<String>> targetAssignment = new HashMap<>();
     targetAssignment.put("instance2", ImmutableSet.of("t-3", "t-2", "t-1", "t-5"));
     targetAssignment.put("instance1", ImmutableSet.of("t-0"));
 
-    assignment = strategy.movePartitions(datastreams.get(0).getTaskPrefix(), assignment, targetAssignment, partitions);
+    assignment = strategy.movePartitions(assignment, targetAssignment, partitionsMetadata);
 
     Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-1"));
     Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-2"));
@@ -88,22 +94,27 @@ public class TestStickyPartitionAssignment {
     Map<String, Set<DatastreamTask>> assignment = generateEmptyAssignment(datastreams, 3, 2);
 
     List<String> partitions = ImmutableList.of("t-0", "t-1", "t-2", "t-3", "t-4", "t-5", "t-6");
+    DatastreamPartitionsMetadata partitionsMetadata =
+        new DatastreamPartitionsMetadata(datastreams.get(0).getTaskPrefix(), partitions);
 
     // Generate partition assignment
-    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, partitions);
+    assignment = strategy.assignPartitions(assignment, partitionsMetadata);
 
     List<String> newPartitions = ImmutableList.of("t-1", "t-3", "t-4", "t-6");
+    DatastreamPartitionsMetadata newPartitionsMetadata =
+        new DatastreamPartitionsMetadata(datastreams.get(0).getTaskPrefix(), newPartitions);
 
-    assignment = strategy.assignPartitions(datastreams.get(0).getTaskPrefix(), assignment, newPartitions);
+
+    assignment = strategy.assignPartitions(assignment, newPartitionsMetadata);
 
     List<String> remainingPartitions = new ArrayList<>();
-    for(String instance : assignment.keySet()) {
+    for (String instance : assignment.keySet()) {
       for (DatastreamTask task : assignment.get(instance)) {
         remainingPartitions.addAll(task.getPartitionsV2());
       }
     }
 
-    Assert.assertEquals(new HashSet<String>(newPartitions), new HashSet<String>(remainingPartitions));
+    Assert.assertEquals(new HashSet<String>(remainingPartitions), new HashSet<String>(newPartitions));
   }
 
   private  Map<String, Set<DatastreamTask>> generateEmptyAssignment(List<DatastreamGroup> datastreams,

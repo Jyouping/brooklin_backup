@@ -124,12 +124,12 @@ public class ZookeeperBackedDatastreamStore implements DatastreamStore {
     String datastreamGroupName  = DatastreamUtils.getTaskPrefix(datastream);
     String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
     _zkClient.ensurePath(path);
-    if (_zkClient.exists(path)){
+    if (_zkClient.exists(path)) {
       String json = targetAssignment.toJson();
       _zkClient.ensurePath(path + '/' + current);
       _zkClient.writeData(path + '/' + current, json);
     }
-    //Todo touch assignment update
+
     try {
       _zkClient.writeData(KeyBuilder.getTargetAssignmentBase(_cluster), String.valueOf(System.currentTimeMillis()));
     } catch (Exception e) {

@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.DatastreamTaskImpl;
 
@@ -33,15 +34,16 @@ public class StickyPartitionAssignmentStrategy {
   /**
    * assign partitions to a particular datastream group
    *
-   * @param dgName datastream group name which needs the partition assignment
    * @param currentAssignment the old assignment
    * @param allPartitions the subscribed partitions received from partition listener
    * @return new assignment mapping
    */
-  public Map<String, Set<DatastreamTask>> assignPartitions(String dgName, Map<String,
-      Set<DatastreamTask>> currentAssignment, List<String> allPartitions) {
+  public Map<String, Set<DatastreamTask>> assignPartitions(Map<String,
+      Set<DatastreamTask>> currentAssignment, DatastreamPartitionsMetadata allPartitions) {
 
     LOG.info("old partition assignment info, assignment: {}", currentAssignment);
+
+    String dgName = allPartitions.getDatastreamGroupName();
 
     List<String> assignedPartitions = new ArrayList<>();
     int totalTaskCount = 0;
@@ -51,11 +53,11 @@ public class StickyPartitionAssignmentStrategy {
       totalTaskCount += dgTask.size();
     }
 
-    List<String> unassignedPartitions = new ArrayList<>(allPartitions);
+    List<String> unassignedPartitions = new ArrayList<>(allPartitions.getPartitions());
     unassignedPartitions.removeAll(assignedPartitions);
 
-    int maxPartitionPerTask = allPartitions.size() / totalTaskCount;
-    final AtomicInteger remainder = new AtomicInteger(allPartitions.size() % totalTaskCount);
+    int maxPartitionPerTask = allPartitions.getPartitions().size() / totalTaskCount;
+    final AtomicInteger remainder = new AtomicInteger(allPartitions.getPartitions().size() % totalTaskCount);
     LOG.info("maxPartitionPerTask {}, task count {}", maxPartitionPerTask, totalTaskCount);
 
     Collections.shuffle(unassignedPartitions);
@@ -69,7 +71,7 @@ public class StickyPartitionAssignmentStrategy {
           return task;
         } else {
           Set<String> partitions = new HashSet<>(task.getPartitionsV2());
-          partitions.retainAll(allPartitions);
+          partitions.retainAll(allPartitions.getPartitions());
 
           //We need to create new task if the partition is changed
           boolean partitionChanged = partitions.size() != task.getPartitionsV2().size();
@@ -96,31 +98,30 @@ public class StickyPartitionAssignmentStrategy {
     });
     LOG.info("new assignment info, assignment: {}, all partitions: {}", newAssignment, allPartitions);
 
-    sanityChecks(dgName, newAssignment, allPartitions);
+    sanityChecks(newAssignment, allPartitions);
     return newAssignment;
   }
 
   /**
    * Move a partition for a datastream group according to the suggestAssignment
    *
-   * @param dgName datastream group which needs the partition movement
    * @param currentAssignment the old assignment
    * @param targetAssignment the target assignment retrieved from Zookeeper
    * @param allPartitions the subscribed partitions received from partition listener
    * @return new assignment
    */
-  public Map<String, Set<DatastreamTask>> movePartitions(String dgName,
-      Map<String, Set<DatastreamTask>> currentAssignment,
-      Map<String, Set<String>> targetAssignment, List<String> allPartitions) {
+  public Map<String, Set<DatastreamTask>> movePartitions(Map<String, Set<DatastreamTask>> currentAssignment,
+      Map<String, Set<String>> targetAssignment, DatastreamPartitionsMetadata allPartitions) {
 
     LOG.info("Try to move partition, task: {}, target assignment: {}, all partitions: {}", currentAssignment,
         targetAssignment, allPartitions);
 
+    String dgName = allPartitions.getDatastreamGroupName();
     Map<String, Set<DatastreamTask>> newAssignment = new HashMap<>(currentAssignment);
 
     Set<String> toReassignPartitions = new HashSet<>();
     targetAssignment.values().stream().forEach(toReassignPartitions::addAll);
-    toReassignPartitions.retainAll(allPartitions);
+    toReassignPartitions.retainAll(allPartitions.getPartitions());
 
     //construct a map to store moved partition, key: partition name, value: source task name
     Map<String, String> partitionMovementSourceMap = new HashMap<>();
@@ -173,7 +174,7 @@ public class StickyPartitionAssignmentStrategy {
       newAssignment.get(inst).add(newTask);
     });
 
-    sanityChecks(dgName, newAssignment, allPartitions);
+    sanityChecks(newAssignment, allPartitions);
     LOG.info("assignment info, task: {}", newAssignment);
     return newAssignment;
   }
@@ -181,11 +182,11 @@ public class StickyPartitionAssignmentStrategy {
   /**
    * check if the computed assignment have all the partitions
    */
-  private void sanityChecks(String datastreamGroupName, Map<String, Set<DatastreamTask>> assignedTasks, List<String> allPartitions) {
+  private void sanityChecks(Map<String, Set<DatastreamTask>> assignedTasks, DatastreamPartitionsMetadata allPartitions) {
     int total = 0;
 
-    List<String> unassignedPartitions = new ArrayList<>(allPartitions);
-
+    List<String> unassignedPartitions = new ArrayList<>(allPartitions.getPartitions());
+    String datastreamGroupName = allPartitions.getDatastreamGroupName();
     for (Set<DatastreamTask> tasksSet : assignedTasks.values()) {
       for (DatastreamTask task : tasksSet) {
         if (datastreamGroupName.equals(task.getTaskPrefix())) {
@@ -194,9 +195,9 @@ public class StickyPartitionAssignmentStrategy {
         }
       }
     }
-    if (total != allPartitions.size()) {
+    if (total != allPartitions.getPartitions().size()) {
       throw new DatastreamRuntimeException(String.format("Validation failed after assignment, assigned partitions "
-          + "size: {} is not equal to all partitions size: {}", total, allPartitions.size()));
+          + "size: {} is not equal to all partitions size: {}", total, allPartitions.getPartitions().size()));
     }
     if (unassignedPartitions.size() > 0) {
       throw new DatastreamRuntimeException(String.format("Validation failed after assignment, "

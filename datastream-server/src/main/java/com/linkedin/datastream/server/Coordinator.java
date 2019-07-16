@@ -46,6 +46,7 @@ import com.linkedin.datastream.common.DatastreamAlreadyExistsException;
 import com.linkedin.datastream.common.DatastreamConstants;
 import com.linkedin.datastream.common.DatastreamDestination;
 import com.linkedin.datastream.common.DatastreamException;
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
 import com.linkedin.datastream.common.DatastreamStatus;
 import com.linkedin.datastream.common.DatastreamUtils;
@@ -989,15 +990,16 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
       for (String connectorType : _connectors.keySet()) {
         PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
         if (partitionListener != null) {
-          Map<String, Optional<List<String>>> datastreamPartitions = partitionListener.getDatastreamPartitions();
+          Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
+              partitionListener.getDatastreamPartitions();
 
           //if the datastreamGroupName is specified, we process for that datastream only
           datastreamGroups.retainAll(datastreamPartitions.keySet());
           datastreamGroupName.ifPresent(dg -> datastreamGroups.retainAll(ImmutableList.of(dg)));
           for (String dgName : datastreamGroups) {
-            List<String> subscribes = partitionListener.getDatastreamPartitions().get(dgName)
+            DatastreamPartitionsMetadata subscribes = partitionListener.getDatastreamPartitions().get(dgName)
                 .orElseThrow(() -> new RuntimeException("Subscribed partition is not ready yet for datastream " + dgName));
-            assignmentByInstance = partitionAssignmentStrategy.assignPartitions(dgName, assignmentByInstance, subscribes);
+            assignmentByInstance = partitionAssignmentStrategy.assignPartitions(assignmentByInstance, subscribes);
           }
         }
       }
@@ -1047,7 +1049,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         PartitionListener partitionListener = _connectors.get(connectorType).getConnector().getPartitionListener();
         if (partitionListener != null) {
 
-          Map<String, Optional<List<String>>> datastreamPartitions = partitionListener.getDatastreamPartitions();
+          Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
+              partitionListener.getDatastreamPartitions();
 
           datastreamGroups.retainAll(datastreamPartitions.keySet());
           //Processed datastream with assignment info only
@@ -1055,11 +1058,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
           for (String dgName : datastreamGroups) {
 
-            List<String> subscribedPartitions = partitionListener.getDatastreamPartitions().get(dgName)
+            DatastreamPartitionsMetadata subscribedPartitions = partitionListener.getDatastreamPartitions().get(dgName)
                 .orElseThrow(() -> new RuntimeException("partition listener is not ready yet for datastream " + dgName));
             Map<String, Set<String>> suggestedAssignment = _adapter.getPartitionMovement(dgName);
-             assignmentByInstance = partitionAssignmentStrategy.movePartitions(dgName, assignmentByInstance,
-                suggestedAssignment, subscribedPartitions);
+             assignmentByInstance = partitionAssignmentStrategy.movePartitions(assignmentByInstance,
+                 suggestedAssignment, subscribedPartitions);
             _adapter.cleanUpPartitionMovement(dgName);
           }
         }
@@ -1084,9 +1087,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   }
 
   private void registerPartitionListener(List<DatastreamGroup> datastreamGroups) {
-    //We need to onDatastreamChanged only active datastream for partition listener
+    //We need to onDatastreamChange only active datastream for partition listener
     List<DatastreamGroup> activeDataStreams = datastreamGroups.stream().filter(dg -> !dg.isPaused()).collect(Collectors.toList());
-    Set<String> datastreamGroupNames = activeDataStreams.stream().map(DatastreamGroup::getTaskPrefix).collect(Collectors.toSet());
 
     for (String connectorType : _connectors.keySet()) {
       ConnectorWrapper connectorWrapper = _connectors.get(connectorType).getConnector();
@@ -1099,7 +1101,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           .filter(x -> x.getConnectorName().equals(connectorType))
           .collect(Collectors.toList());
 
-      connectorWrapper.getPartitionListener().onDatastreamChanged(datastreamsPerConnectorType);
+      connectorWrapper.getPartitionListener().onDatastreamChange(datastreamsPerConnectorType);
     }
   }
 

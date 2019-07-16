@@ -46,6 +46,9 @@ public interface DatastreamStore {
    */
   void deleteDatastream(String key);
 
+  /**
+   * update the target assignment info for a particular datastream
+   * @throws DatastreamException
+   */
   void updateDatastreamPartitions(String key, Datastream datastream, TargetAssignment targetAssignment) throws DatastreamException;
-
 }

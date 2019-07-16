@@ -5,11 +5,14 @@
  */
 package com.linkedin.datastream.server.api.connector;
 
-import com.linkedin.datastream.server.DatastreamGroup;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
+
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
+import com.linkedin.datastream.server.DatastreamGroup;
 
 
 /**
@@ -27,18 +30,24 @@ public interface PartitionListener {
    *
    * @param callback a lamda consumer which takes the name of datastream group
    */
-  void onPartitionChange(Consumer<String> callback);
+  default void onPartitionChange(Consumer<String> callback) {
+
+  }
 
   /**
    * callback when the datastreamGroup to this listener instance has been changed
    */
-  void onDatastreamChanged(List<DatastreamGroup> datastreamGroups);
+  default void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
+
+  }
 
   /**
    * Get the partitions for all datastream group. Return Optional.empty() for that datastreamGroup if it has not fetch
    * the partition info yet
    */
-  Map<String, Optional<List<String>>> getDatastreamPartitions();
+  default Map<String, Optional<DatastreamPartitionsMetadata>> getDatastreamPartitions() {
+    return new HashMap<String, Optional<DatastreamPartitionsMetadata>>();
+  }
 
   /**
    * Shut down the partition listener
