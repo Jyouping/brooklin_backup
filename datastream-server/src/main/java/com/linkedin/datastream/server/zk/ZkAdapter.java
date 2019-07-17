@@ -1005,7 +1005,7 @@ public class ZkAdapter {
    * @param timeout max wait time to wait for a locked task for releasing
    */
   public void waitForDependencies(DatastreamTaskImpl task, Duration timeout) {
-    task.getDependentTasks().stream().forEach(previousTask -> {
+    task.getDependencies().stream().forEach(previousTask -> {
         String lockPath = KeyBuilder.datastreamTaskLock(_cluster, task.getConnectorType(), previousTask);
       if (_zkclient.exists(lockPath)) {
         waitForTaskRelease(task, timeout.toMillis(), lockPath);

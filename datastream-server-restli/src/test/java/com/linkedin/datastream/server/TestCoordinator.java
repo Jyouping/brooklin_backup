@@ -766,7 +766,7 @@ public class TestCoordinator {
         createCoordinator(_zkConnectionString, testCluster, new Properties(), transportProviderAdminFactory);
     TestHookConnector connector1 = new TestHookConnector("testDatastreamWithBYOTConnector", testConnectorType);
     coordinator.addConnector(testConnectorType, connector1, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, false);
     coordinator.start();
 
     ZkClient zkClient = new ZkClient(_zkConnectionString);

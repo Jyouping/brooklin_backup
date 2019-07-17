@@ -15,8 +15,8 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-
 import java.util.stream.Collectors;
+
 import org.apache.commons.collections.ListUtils;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -28,8 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
-import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
+import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.connectors.kafka.AbstractKafkaBasedConnectorTask;
 import com.linkedin.datastream.connectors.kafka.AbstractKafkaConnector;

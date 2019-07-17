@@ -5,29 +5,28 @@
  */
 package com.linkedin.datastream.server;
 
-import com.google.common.collect.ImmutableSet;
-import com.linkedin.datastream.server.zk.ZkAdapter;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
-
 import java.util.HashSet;
+
 import org.testng.Assert;
 import org.testng.annotations.Test;
+
+import com.google.common.collect.ImmutableSet;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
 import com.linkedin.datastream.common.JsonUtils;
+import com.linkedin.datastream.server.zk.ZkAdapter;
 import com.linkedin.datastream.testutil.DatastreamTestUtils;
 
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
-
-
+import static org.mockito.Mockito.when;
 
 
 /**
@@ -60,7 +59,7 @@ public class TestDatastreamTask {
     task.setZkAdapter(mockZkAdapter);
     when(mockZkAdapter.checkIfTaskLocked(anyString(), anyString())).thenReturn(false);
     DatastreamTaskImpl task2 = new DatastreamTaskImpl(task, new ArrayList<>());
-    Assert.assertEquals(new HashSet<String>(task2.getDependentTasks()), ImmutableSet.of(task.getDatastreamTaskName(), "task0"));
+    Assert.assertEquals(new HashSet<String>(task2.getDependencies()), ImmutableSet.of(task.getDatastreamTaskName(), "task0"));
   }
 
   @Test
@@ -74,7 +73,7 @@ public class TestDatastreamTask {
     task.setZkAdapter(mockZkAdapter);
     when(mockZkAdapter.checkIfTaskLocked(anyString(), anyString())).thenReturn(true);
     DatastreamTaskImpl task2 = new DatastreamTaskImpl(task, new ArrayList<>());
-    Assert.assertEquals(new HashSet<String>(task2.getDependentTasks()), ImmutableSet.of(task.getDatastreamTaskName()));
+    Assert.assertEquals(new HashSet<String>(task2.getDependencies()), ImmutableSet.of(task.getDatastreamTaskName()));
   }
 
   @Test
