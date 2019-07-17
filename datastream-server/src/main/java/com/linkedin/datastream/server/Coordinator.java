@@ -152,7 +152,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
        - The tasks status are changed from OK to Paused.
    */
   public static final String PAUSED_INSTANCE = "PAUSED_INSTANCE";
-  public static final String EVENT_PRODUCER_CONFIG_DOMAIN = "brooklin.server.eventProducer";
+  private static final String EVENT_PRODUCER_CONFIG_DOMAIN = "brooklin.server.eventProducer";
 
   private static final String MODULE = Coordinator.class.getSimpleName();
   private static final long EVENT_THREAD_JOIN_TIMEOUT = 1000L;
@@ -476,8 +476,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         .map(DatastreamTask::getConnectorType)
         .distinct()
         .collect(Collectors.toList());
-    List<String> newConnectorList = new ArrayList<>();
-    newConnectorList.addAll(currentAssignment.keySet());
+    List<String> newConnectorList = new ArrayList<>(currentAssignment.keySet());
 
     List<String> deactivated = new ArrayList<>(oldConnectorList);
     deactivated.removeAll(newConnectorList);
@@ -1255,7 +1254,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
    */
   public void isDatastreamUpdateTypeSupported(Datastream datastream, DatastreamConstants.UpdateType updateType)
       throws DatastreamValidationException {
-    _log.info("About to validate datastream update type {} for datastream", updateType, datastream);
+    _log.info("About to validate datastream update type {} for datastream {}", updateType, datastream);
     try {
       String connectorName = datastream.getConnectorName();
       ConnectorInfo connectorInfo = _connectors.get(connectorName);
@@ -1300,10 +1299,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         .collect(Collectors.toList());
 
     // If datastream of name already exists return error
-    if (!allDatastreams.stream()
-        .filter(x -> x.getName().equals(datastream.getName()))
-        .collect(Collectors.toList())
-        .isEmpty()) {
+    if (allDatastreams.stream().anyMatch(x -> x.getName().equals(datastream.getName()))) {
       String errMsg = String.format("Datastream with name %s already exists", datastream.getName());
       _log.error(errMsg);
       throw new DatastreamAlreadyExistsException(errMsg);
@@ -1367,11 +1363,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
               ds -> ds.getDestination().getConnectionString().equals(datastream.getDestination().getConnectionString()))
           .collect(Collectors.toList());
       if (!sameDestinationDatastreams.isEmpty()) {
-        String errMsg =
-            ("Cannot create a BYOT datastream where the destination is being used  by other datastream(s) :");
-        for (Datastream x : sameDestinationDatastreams) {
-          errMsg = errMsg + " " + x.getName();
-        }
+        String datastreamNames = sameDestinationDatastreams.stream()
+            .map(Datastream::getName)
+            .collect(Collectors.joining(", "));
+
+        String errMsg = String.format("Cannot create a BYOT datastream where the destination is being used by other datastream(s): %s",
+            datastreamNames);
         _log.error(errMsg);
         throw new DatastreamValidationException(errMsg);
       }
@@ -1466,7 +1463,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
    * on the leader.
    */
   public BooleanSupplier getIsLeader() {
-    return () -> _adapter.isLeader();
+    return _adapter::isLeader;
   }
 
   /**

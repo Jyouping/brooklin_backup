@@ -81,7 +81,6 @@ public class DatastreamTaskImpl implements DatastreamTask {
   // Status to indicate if instance has hooked up and process this object
   private ZkAdapter _zkAdapter;
 
-  private Map<String, String> _properties = new HashMap<>();
   private DatastreamEventProducer _eventProducer;
   private String _transportProviderName;
   private SerDeSet _destinationSerDes = new SerDeSet(null, null, null);

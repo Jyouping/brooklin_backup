@@ -83,8 +83,8 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   protected static final String CONFIG_MAX_IN_FLIGHT_MSGS_THRESHOLD = "maxInFlightMessagesThreshold";
   protected static final String CONFIG_MIN_IN_FLIGHT_MSGS_THRESHOLD = "minInFlightMessagesThreshold";
   protected static final String CONFIG_FLOW_CONTROL_ENABLED = "flowControlEnabled";
-  protected static final long DEFAULT_MAX_IN_FLIGHT_MSGS_THRESHOLD = 5000;
-  protected static final long DEFAULT_MIN_IN_FLIGHT_MSGS_THRESHOLD = 1000;
+  private static final long DEFAULT_MAX_IN_FLIGHT_MSGS_THRESHOLD = 5000;
+  private static final long DEFAULT_MIN_IN_FLIGHT_MSGS_THRESHOLD = 1000;
 
   // constants for topic manager
   public static final String TOPIC_MANAGER_FACTORY = "topicManagerFactory";
@@ -209,7 +209,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   }
 
   @Override
-  protected DatastreamProducerRecord translate(ConsumerRecord<?, ?> fromKafka, Instant readTime) throws Exception {
+  protected DatastreamProducerRecord translate(ConsumerRecord<?, ?> fromKafka, Instant readTime) {
     long eventsSourceTimestamp =
         fromKafka.timestampType() == TimestampType.LOG_APPEND_TIME ? fromKafka.timestamp() : readTime.toEpochMilli();
     HashMap<String, String> metadata = new HashMap<>();
@@ -238,13 +238,24 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   }
 
   @Override
-  protected void sendDatastreamProducerRecord(DatastreamProducerRecord datastreamProducerRecord) throws Exception {
+  protected void sendDatastreamProducerRecord(DatastreamProducerRecord datastreamProducerRecord,
+      TopicPartition srcTopicPartition, int numBytes) {
     if (_isFlushlessModeEnabled) {
+      // The topic/partition from checkpoint is the same as srcTopicPartition
       KafkaMirrorMakerCheckpoint sourceCheckpoint =
           new KafkaMirrorMakerCheckpoint(datastreamProducerRecord.getCheckpoint());
       String topic = sourceCheckpoint.getTopic();
       int partition = sourceCheckpoint.getPartition();
-      _flushlessProducer.send(datastreamProducerRecord, topic, partition, sourceCheckpoint.getOffset());
+      _flushlessProducer.send(datastreamProducerRecord, topic, partition, sourceCheckpoint.getOffset(),
+          ((metadata, exception) -> {
+            if (exception != null) {
+              _logger.warn("Detected exception being throw from callback for src partition: {} while sending producer "
+                  + "record: {}, exception: ", srcTopicPartition, datastreamProducerRecord, exception);
+              rewindAndPausePartitionOnException(srcTopicPartition, exception);
+            } else {
+              _consumerMetrics.updateBytesProcessedRate(numBytes);
+            }
+          }));
       if (_flowControlEnabled) {
         TopicPartition tp = new TopicPartition(topic, partition);
         long inFlightMessageCount = _flushlessProducer.getInFlightCount(topic, partition);
@@ -261,9 +272,11 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
         }
       }
     } else {
-      super.sendDatastreamProducerRecord(datastreamProducerRecord);
+      super.sendDatastreamProducerRecord(datastreamProducerRecord, srcTopicPartition, numBytes);
     }
   }
+
+
 
   @Override
   public void onPartitionsAssigned(Collection<TopicPartition> partitions) {

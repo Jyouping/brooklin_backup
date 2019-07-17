@@ -8,7 +8,6 @@ package com.linkedin.datastream.connectors.kafka;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -21,8 +20,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.Validate;
@@ -32,17 +29,18 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.InvalidOffsetException;
 import org.apache.kafka.clients.consumer.NoOffsetForPartitionException;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetOutOfRangeException;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.codehaus.jackson.type.TypeReference;
 import org.slf4j.Logger;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 
 import com.linkedin.datastream.common.Datastream;
@@ -53,7 +51,6 @@ import com.linkedin.datastream.common.DatastreamTransientException;
 import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.JsonUtils;
 import com.linkedin.datastream.common.PollUtils;
-import com.linkedin.datastream.common.diag.DatastreamPositionResponse;
 import com.linkedin.datastream.connectors.CommonConnectorMetrics;
 import com.linkedin.datastream.kafka.KafkaDatastreamMetadataConstants;
 import com.linkedin.datastream.metrics.BrooklinMetricInfo;
@@ -122,7 +119,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
 
   protected final KafkaBasedConnectorTaskMetrics _consumerMetrics;
 
-  protected final Optional<KafkaPositionTracker> _kafkaPositionTracker;
+  private final Optional<KafkaPositionTracker> _kafkaPositionTracker;
 
   private volatile int _pollAttempts;
 
@@ -167,11 +164,8 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     _commitTimeout = config.getCommitTimeout();
     _consumerMetrics = createKafkaBasedConnectorTaskMetrics(metricsPrefix, _datastreamName, _logger);
 
-    _kafkaPositionTracker = config.getEnableKafkaPositionTracker() ? Optional.of(new KafkaPositionTracker(_taskName,
-        () -> !_shutdown && (_connectorTaskThread == null || _connectorTaskThread.isAlive()),
-        () -> createKafkaConsumer(_consumerProps))) : Optional.empty();
-
     _pollAttempts = 0;
+    _kafkaPositionTracker = Optional.ofNullable(createKafkaPositionTracker(config));
   }
 
   protected static String generateMetricsPrefix(String connectorName, String simpleClassName) {
@@ -222,35 +216,46 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
    * @param readTime the instant the records were successfully polled from the Kafka source
    */
   protected void translateAndSendBatch(ConsumerRecords<?, ?> records, Instant readTime) {
-    boolean shouldAddPausePartitionsTask = false;
     // iterate through each topic partition one at a time, for better isolation
     for (TopicPartition topicPartition : records.partitions()) {
       for (ConsumerRecord<?, ?> record : records.records(topicPartition)) {
         try {
-          sendMessage(record, readTime);
-        } catch (Exception e) {
-          _consumerMetrics.updateErrorRate(1);
-          // seek to previous checkpoints for this topic partition
-          seekToLastCheckpoint(Collections.singleton(topicPartition));
-          if ((!containsTransientException(e)) && _pausePartitionOnError) {
-            // if doesn't contain DatastreamTransientException and it's configured to pause partition on error conditions,
-            // add to auto-paused set
-            _logger.warn("Got exception while sending record {}, adding topic partition {} to auto-pause set", record,
-                topicPartition);
-            Instant start = Instant.now();
-            _autoPausedSourcePartitions.put(topicPartition,
-                PausedSourcePartitionMetadata.sendError(start, _pauseErrorPartitionDuration));
-            shouldAddPausePartitionsTask = true;
+          if (_autoPausedSourcePartitions.containsKey(topicPartition)) {
+            _logger.warn("Abort sending as {} is auto-paused, rewind offset", topicPartition);
+            seekToLastCheckpoint(Collections.singleton(topicPartition));
+            break;
+          } else {
+            DatastreamProducerRecord datastreamProducerRecord = translate(record, readTime);
+            int numBytes = record.serializedKeySize() + record.serializedValueSize();
+            sendDatastreamProducerRecord(datastreamProducerRecord, topicPartition, numBytes);
           }
+        } catch (Exception e) {
+          _logger.warn("Got exception while sending record {}", record);
+          rewindAndPausePartitionOnException(topicPartition, e);
           // skip other messages for this partition, but can continue processing other partitions
           break;
         }
       }
     }
-    _kafkaPositionTracker.ifPresent(tracker -> tracker.updatePositions(readTime, records, _consumer.metrics(),
-        records.partitions().stream().collect(Collectors.toMap(Function.identity(), tp -> _consumer.position(tp)))));
+  }
 
-    if (shouldAddPausePartitionsTask) {
+  protected void rewindAndPausePartitionOnException(TopicPartition srcTopicPartition, Exception ex) {
+    _consumerMetrics.updateErrorRate(1);
+    Instant start = Instant.now();
+    // seek to previous checkpoints for this topic partition
+    boolean partitionRewound = false;
+    try {
+      seekToLastCheckpoint(Collections.singleton(srcTopicPartition));
+      partitionRewound = true;
+    } catch (Exception e) {
+      _logger.error("Partition rewind failed due to ", e);
+    }
+    if (_pausePartitionOnError && (!partitionRewound || !containsTransientException(ex))) {
+      // if doesn't contain DatastreamTransientException and it's configured to pause partition on error conditions,
+      // add to auto-paused set
+      _logger.warn("Adding source topic partition {} to auto-pause set", srcTopicPartition);
+      _autoPausedSourcePartitions.put(srcTopicPartition,
+          PausedSourcePartitionMetadata.sendError(start, _pauseErrorPartitionDuration, ex));
       _taskUpdates.add(DatastreamConstants.UpdateType.PAUSE_RESUME_PARTITIONS);
     }
   }
@@ -265,33 +270,17 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     return false;
   }
 
-
-  protected void sendMessage(ConsumerRecord<?, ?> record, Instant readTime) throws Exception {
-    int sendAttempts = 0;
-    DatastreamProducerRecord datastreamProducerRecord = translate(record, readTime);
-    while (true) {
-      try {
-        sendAttempts++;
-        sendDatastreamProducerRecord(datastreamProducerRecord);
-        int numBytes = record.serializedKeySize() + record.serializedValueSize();
+  protected void sendDatastreamProducerRecord(DatastreamProducerRecord datastreamProducerRecord,
+      TopicPartition srcTopicPartition, int numBytes) {
+    _producer.send(datastreamProducerRecord, ((metadata, exception) -> {
+      if (exception != null) {
+        _logger.warn("Detect exception being throw from callback for src partition: {} while sending producer "
+          + "record: {}, exception: ", srcTopicPartition, datastreamProducerRecord, exception);
+        rewindAndPausePartitionOnException(srcTopicPartition, exception);
+      } else {
         _consumerMetrics.updateBytesProcessedRate(numBytes);
-        return; // Break the retry loop and exit.
-      } catch (Exception e) {
-        _logger.error("Error sending Message. task: {} ; error: {};", _taskName, e.toString());
-        _logger.error("Stack Trace: {}", Arrays.toString(e.getStackTrace()));
-        if (_shutdown || sendAttempts >= _maxRetryCount) {
-          _logger.error("Send messages failed with exception: {}", e);
-          throw e;
-        }
-        _logger.warn("Sleeping for {} seconds before retrying. Retry {} of {}", _retrySleepDuration.getSeconds(),
-            sendAttempts, _maxRetryCount);
-        Thread.sleep(_retrySleepDuration.toMillis());
       }
-    }
-  }
-
-  protected void sendDatastreamProducerRecord(DatastreamProducerRecord datastreamProducerRecord) throws Exception {
-    _producer.send(datastreamProducerRecord, null);
+    }));
   }
 
   @Override
@@ -314,7 +303,6 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
 
         // read a batch of records
         records = pollRecords(pollInterval);
-
         // handle startup notification if this is the 1st poll call
         if (startingUp) {
           pollInterval = _pollTimeoutMillis;
@@ -432,6 +420,9 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
         _consumerMetrics.updateLastEventReceivedTime(Instant.now());
       }
       _pollAttempts = 0;
+
+      sendPollInfoToPositionTracker(_consumer, records);
+
       return records;
     } catch (NoOffsetForPartitionException e) {
       handleNoOffsetForPartitionException(e);
@@ -442,6 +433,42 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     } catch (Exception e) {
       handlePollRecordsException(e);
       return ConsumerRecords.EMPTY;
+    }
+  }
+
+  /**
+   * Sends the result of the consumer's {@link Consumer#poll(Duration)} to the position tracker.
+   *
+   * @param consumer the consumer that was used
+   * @param records the records the consumer received
+   * @throws WakeupException if the consumer is shutting down
+   * @throws InterruptException if the consumer is shutting down
+   */
+  private void sendPollInfoToPositionTracker(Consumer<?, ?> consumer, ConsumerRecords<?, ?> records) {
+    try {
+      _kafkaPositionTracker.ifPresent(tracker -> {
+        // The calls to position() (needed for initializing the position data for these positions) are intentionally
+        // made after a poll() so that they will return very quickly
+        for (final TopicPartition topicPartition : tracker.getUninitializedPartitions()) {
+          try {
+            tracker.initializePartition(topicPartition, consumer.position(topicPartition));
+          } catch (IllegalStateException e) {
+            // Would occur if the partition has been unassigned but onPartitionsRevoked() has not yet been called.
+            // In this case, there is nothing we can do but wait for onPartitionsRevoked().
+            _logger.trace("Got IllegalStateException when processing partition {}", topicPartition, e);
+          } catch (InvalidOffsetException e) {
+            // Occurs if no offset is defined for the partition and no offset reset policy is defined.
+            // This error should have been caught by poll(), but will definitely be caught by poll() in the next run,
+            // so it should be safe to ignore this exception and allow records processing to continue.
+            _logger.trace("Got InvalidOffsetException when processing partition {}", topicPartition, e);
+          }
+        }
+        tracker.onRecordsReceived(records, consumer.metrics());
+      });
+    } catch (WakeupException | InterruptException e) {
+      throw e; // Consumer is shutting down, so rethrow
+    } catch (Exception e) {
+      _logger.warn("Got uncaught exception while processing position tracker code (swallowing and continuing)", e);
     }
   }
 
@@ -478,7 +505,9 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
   protected void handleNoOffsetForPartitionException(NoOffsetForPartitionException e) {
     _logger.info("Poll threw NoOffsetForPartitionException for partitions {}.", e.partitions());
     if (!_shutdown) {
-      seekToStartPosition(_consumer, e.partitions());
+      // Seek to start position, by default we are starting from latest one as we just start consumption
+      seekToStartPosition(_consumer, e.partitions(),
+          _consumerProps.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUMER_AUTO_OFFSET_RESET_CONFIG_LATEST));
     }
   }
 
@@ -560,7 +589,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
   /**
    * Seek to the last checkpoint for the given topicPartitions.
    */
-  private void seekToLastCheckpoint(Set<TopicPartition> topicPartitions) {
+  void seekToLastCheckpoint(Set<TopicPartition> topicPartitions) {
     _logger.info("Trying to seek to previous checkpoint for partitions: {}", topicPartitions);
     Map<TopicPartition, OffsetAndMetadata> lastCheckpoint = new HashMap<>();
     Set<TopicPartition> tpWithNoCommits = new HashSet<>();
@@ -575,23 +604,23 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
       }
     });
     _logger.info("Seeking to previous checkpoints {}", lastCheckpoint);
-    // reset consumer to last checkpoint
+    // reset consumer to last checkpoint, by default we will rewind the checkpoint
     lastCheckpoint.forEach((tp, offsetAndMetadata) -> _consumer.seek(tp, offsetAndMetadata.offset()));
     if (!tpWithNoCommits.isEmpty()) {
       _logger.info("Seeking to start position for partitions: {}", tpWithNoCommits);
-      seekToStartPosition(_consumer, tpWithNoCommits);
+      seekToStartPosition(_consumer, tpWithNoCommits,
+          _consumerProps.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUMER_AUTO_OFFSET_RESET_CONFIG_EARLIEST));
     }
   }
 
-  private void seekToStartPosition(Consumer<?, ?> consumer, Set<TopicPartition> partitions) {
+  private void seekToStartPosition(Consumer<?, ?> consumer, Set<TopicPartition> partitions, String strategy) {
+    // We would like to consume from latest when there is no offset. However, if we rewind due to exception, we want
+    // to rewind to earliest to make sure the messages which are added after we start consuming don't get skipped
     if (_startOffsets.isPresent()) {
       _logger.info("Datastream is configured with StartPosition. Trying to start from {}", _startOffsets.get());
       seekToOffset(consumer, partitions, _startOffsets.get());
     } else {
-      // means we have no saved offsets for some partitions, seek to end or beginning based on consumer config
-      if (CONSUMER_AUTO_OFFSET_RESET_CONFIG_LATEST.equals(
-          _consumerProps.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-              CONSUMER_AUTO_OFFSET_RESET_CONFIG_LATEST))) {
+      if (CONSUMER_AUTO_OFFSET_RESET_CONFIG_LATEST.equals(strategy)) {
         _logger.info("Datastream was not configured with StartPosition. Seeking to end for partitions: {}", partitions);
         consumer.seekToEnd(partitions);
       } else {
@@ -620,13 +649,14 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     _consumerAssignment.clear();
     _consumerAssignment.addAll(partitions);
     _consumerMetrics.updateNumPartitions(_consumerAssignment.size());
-    _consumerMetrics.updateNumTopics(_consumerAssignment.stream().map(tp -> tp.topic()).distinct().count());
+    _consumerMetrics.updateNumTopics(_consumerAssignment.stream().map(TopicPartition::topic).distinct().count());
     _logger.info("{} Current assignment is {}", _datastreamTask.getDatastreamTaskName(), _consumerAssignment);
   }
 
   @Override
   public void onPartitionsRevoked(Collection<TopicPartition> topicPartitions) {
     _logger.info("Partition ownership revoked for {}, checkpointing.", topicPartitions);
+    _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsRevoked(topicPartitions));
     if (!_shutdown && !topicPartitions.isEmpty()) { // there is a commit at the end of the run method, skip extra commit in shouldDie mode.
       try {
         maybeCommitOffsets(_consumer, true); // happens inline as part of poll
@@ -641,20 +671,17 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     newAssignment.removeAll(topicPartitions);
     updateConsumerAssignment(newAssignment);
 
-    // Remove old position data
-    _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsRevoked(_consumerAssignment));
-
     // update paused partitions
     _taskUpdates.add(DatastreamConstants.UpdateType.PAUSE_RESUME_PARTITIONS);
   }
 
   @Override
   public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-    _consumerMetrics.updateRebalanceRate(1);
     _logger.info("{} Partition ownership assigned for {}.", _datastreamTask.getDatastreamTaskName(), partitions);
+    _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsAssigned(partitions));
+    _consumerMetrics.updateRebalanceRate(1);
 
     updateConsumerAssignment(partitions);
-    _kafkaPositionTracker.ifPresent(tracker -> tracker.onPartitionsAssigned(partitions));
 
     // update paused partitions, in case.
     _taskUpdates.add(DatastreamConstants.UpdateType.PAUSE_RESUME_PARTITIONS);
@@ -924,24 +951,30 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
   }
 
   /**
-   * Gets a DatastreamPositionResponse containing time-based position data for the current task.
-   * @return the current time-based position data, or null if position tracker is disabled
-   * @see com.linkedin.datastream.common.diag.PhysicalSourcePosition for information on what a position is
+   * Creates a KafkaPositionTracker if enabled in the provided config.
+   *
+   * @param config the provided config
+   * @return a KafkaPositionTracker if enabled in config, or null
    */
-  public DatastreamPositionResponse getPositionResponse() {
-    return _kafkaPositionTracker.map(
-        tracker -> new DatastreamPositionResponse(ImmutableMap.of(_datastreamName, tracker.getPositions())))
-        .orElse(null);
+  private KafkaPositionTracker createKafkaPositionTracker(KafkaBasedConnectorConfig config) {
+    if (config.getEnablePositionTracker()) {
+      return KafkaPositionTracker.builder()
+          .withConnectorTaskStartTime(Instant.now())
+          .withConsumerSupplier(() -> createKafkaConsumer(_consumerProps))
+          .withDatastreamTask(_datastreamTask)
+          .withEnableBrokerOffsetFetcher(config.getEnableBrokerOffsetFetcher())
+          .withIsConnectorTaskAlive(() -> !_shutdown && (_connectorTaskThread == null || _connectorTaskThread.isAlive()))
+          .build();
+    }
+    return null;
   }
 
   /**
-   * Gets a DatastreamPositionResponse containing offset-based position data for the current task.
-   * @return the current offset-based position data, or null if position tracker is disabled
-   * @see com.linkedin.datastream.common.diag.PhysicalSourcePosition for information on what a position is
+   * Gets the KafkaPositionTracker for this instance, if it exists.
+   *
+   * @return the KafkaPositionTracker for this instance, if it exists
    */
-  public DatastreamPositionResponse getOffsetPositionResponse() {
-    return _kafkaPositionTracker.map(
-        tracker -> new DatastreamPositionResponse(ImmutableMap.of(_datastreamName, tracker.getOffsetPositions())))
-        .orElse(null);
+  public Optional<KafkaPositionTracker> getKafkaPositionTracker() {
+    return _kafkaPositionTracker;
   }
 }
