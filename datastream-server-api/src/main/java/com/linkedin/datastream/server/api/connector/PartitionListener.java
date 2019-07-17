@@ -16,7 +16,7 @@ import com.linkedin.datastream.server.DatastreamGroup;
 
 
 /**
- * Partition Listener listens the topic partitions change for all registered datastream groups. It is required to
+ * Partition Listener define the interface requires for listening and management the partition changes. It is required to
  * implement this interface if the connector wants to manage the assignment
  */
 public interface PartitionListener {
@@ -35,7 +35,7 @@ public interface PartitionListener {
   }
 
   /**
-   * callback when the datastreamGroup to this connector instance has been changed
+   * callback when the datastreamGroups assigned to this connector instance has been changed
    */
   default void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
 

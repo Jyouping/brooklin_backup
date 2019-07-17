@@ -113,9 +113,6 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
   private GroupIdConstructor _groupIdConstructor;
 
-
-
-
   /**
    * Constructor for KafkaMirrorMakerConnectorTask
    * @param config Task configuration properties

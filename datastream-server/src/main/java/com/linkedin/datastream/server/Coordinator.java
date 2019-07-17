@@ -46,8 +46,8 @@ import com.linkedin.datastream.common.DatastreamAlreadyExistsException;
 import com.linkedin.datastream.common.DatastreamConstants;
 import com.linkedin.datastream.common.DatastreamDestination;
 import com.linkedin.datastream.common.DatastreamException;
-import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
+import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
 import com.linkedin.datastream.common.DatastreamStatus;
 import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.ErrorLogger;
@@ -267,7 +267,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _eventThread.start();
     _adapter.connect();
 
-
     for (String connectorType : _connectors.keySet()) {
       ConnectorInfo connectorInfo = _connectors.get(connectorType);
       ConnectorWrapper connector = connectorInfo.getConnector();
@@ -410,7 +409,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _log.info("Coordinator::onDatastreamUpdate completed successfully");
   }
 
-
   @Override
   public void onPartitionMovement() {
     _log.info("Coordinator::onPartitionMovement is called");
@@ -448,7 +446,6 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     assignment.forEach(ds -> {
       DatastreamTask task = getDatastreamTask(ds);
       if (task != null) {
-        _log.info("Task info: {}", task);
         String connectorType = task.getConnectorType();
         if (!currentAssignment.containsKey(connectorType)) {
           currentAssignment.put(connectorType, new ArrayList<>());
@@ -683,7 +680,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           break;
 
         case LEADER_PARTITION_ASSIGNMENT:
-          performPartitionAssignment(event._datastreamGroupName);
+          performPartitionAssignment(event.getDatastreamGroupName());
           break;
 
         case LEADER_PARTITION_MOVEMENT:
@@ -1177,7 +1174,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
    *                            Coordinator will not perform checkpointing to ZooKeeper.
    * @param deduper the deduper used by connector
    * @param authorizerName name of the authorizer configured by connector@
-   * @param enablePartitionAssignment enable partition assignment for this connecot or not
+   * @param enablePartitionAssignment enable partition assignment for this connector
    *
    */
   public void addConnector(String connectorName, Connector connector, AssignmentStrategy strategy,

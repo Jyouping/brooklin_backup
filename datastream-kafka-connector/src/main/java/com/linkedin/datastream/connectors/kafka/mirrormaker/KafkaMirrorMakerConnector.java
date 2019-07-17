@@ -15,8 +15,8 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-
 import java.util.stream.Collectors;
+
 import org.apache.commons.collections.ListUtils;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -28,8 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
-import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.DatastreamPartitionsMetadata;
+import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.connectors.kafka.AbstractKafkaBasedConnectorTask;
 import com.linkedin.datastream.connectors.kafka.AbstractKafkaConnector;
@@ -50,14 +50,16 @@ import com.linkedin.datastream.server.api.connector.DatastreamValidationExceptio
  */
 public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
   protected static final String IS_FLUSHLESS_MODE_ENABLED = "isFlushlessModeEnabled";
+  protected static final String PARTITION_FETCH_INTERVAL = "PartitionFetchIntervalMs";
   protected static final String MM_TOPIC_PLACEHOLDER = "*";
 
   private static final Logger LOG = LoggerFactory.getLogger(KafkaMirrorMakerConnector.class);
   private static final String DEST_CONSUMER_GROUP_ID_SUFFIX = "-topic-partition-listener";
   private static final String DOMAIN_KAFKA_CONSUMER = "consumer";
-  private static final long FETCH_PARTITION_INTERVAL_MS = 30000;
+  private static final long DEFAULT_PARTITION_FETCH_INTERVAL = 30000;
 
   private final boolean _isFlushlessModeEnabled;
+  private final long _partitionFetchIntervalMs;
   private final KafkaConsumerFactory<?, ?> _listenerConsumerFactory;
   private final Map<String, PartitionDiscoveryThread> _partitionDiscoveryThreadMap = new HashMap<>();
   private final Properties _consumerProperties;
@@ -76,8 +78,10 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
         clusterName, LOG);
     _isFlushlessModeEnabled =
         Boolean.parseBoolean(config.getProperty(IS_FLUSHLESS_MODE_ENABLED, Boolean.FALSE.toString()));
+    _partitionFetchIntervalMs = Long.parseLong(config.getProperty(PARTITION_FETCH_INTERVAL,
+        Long.toString(DEFAULT_PARTITION_FETCH_INTERVAL)));
     VerifiableProperties verifiableProperties = new VerifiableProperties(config);
-    _consumerProperties = verifiableProperties.getDomainProperties(DOMAIN_KAFKA_CONSUMER);;
+    _consumerProperties = verifiableProperties.getDomainProperties(DOMAIN_KAFKA_CONSUMER);
     _listenerConsumerFactory = new KafkaConsumerFactoryImpl();
     _shutdown = false;
   }
@@ -162,7 +166,7 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
         datastreams.put(s, Optional.empty());
       }
     });
-    return new HashMap<>();
+    return datastreams;
   }
 
 
@@ -265,7 +269,7 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
             _initialized = true;
             _partitionChangeCallback.accept(_datastreamGroupName);
           }
-          Thread.sleep(FETCH_PARTITION_INTERVAL_MS);
+          Thread.sleep(_partitionFetchIntervalMs);
         } catch (Throwable t) {
           LOG.error("detect error for thread " + _datastream.getName() + ", ex: ", t);
         }

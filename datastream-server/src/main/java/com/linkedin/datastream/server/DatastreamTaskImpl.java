@@ -76,7 +76,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   private List<Integer> _partitions;
   private List<String> _partitionsV2;
 
-  private List<String> _dependentTasks;
+  private List<String> _dependencies;
 
   // Status to indicate if instance has hooked up and process this object
   private ZkAdapter _zkAdapter;
@@ -94,7 +94,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public DatastreamTaskImpl() {
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>();
-    _dependentTasks = new ArrayList<>();
+    _dependencies = new ArrayList<>();
   }
 
   /**
@@ -139,37 +139,37 @@ public class DatastreamTaskImpl implements DatastreamTask {
       }
     }
     LOG.info("Created new DatastreamTask " + this);
-    _dependentTasks = new ArrayList<>();
+    _dependencies = new ArrayList<>();
   }
 
 
   /**
    * Constructor for new DatastreamTaskImpl which inherits some partitions from previous Task
    * We must generate a new UUID for task
-   * @param dependentTask task which need to release the partitions
+   * @param predecessor task which need to release the partitions
    * @param partitionsV2 new partitions for this task
    */
-  public DatastreamTaskImpl(DatastreamTaskImpl dependentTask, Collection<String> partitionsV2) {
+  public DatastreamTaskImpl(DatastreamTaskImpl predecessor, Collection<String> partitionsV2) {
     Validate.isTrue(partitionsV2.size() <= MAX_PARTITION_NUM, "Too many partitions allocated for a single task");
 
-    _datastreams = dependentTask._datastreams;
-    _taskPrefix = dependentTask._taskPrefix;
-    _connectorType = dependentTask._connectorType;
+    _datastreams = predecessor._datastreams;
+    _taskPrefix = predecessor._taskPrefix;
+    _connectorType = predecessor._connectorType;
     _id = UUID.randomUUID().toString();
-    _transportProviderName = dependentTask._transportProviderName;
+    _transportProviderName = predecessor._transportProviderName;
     _partitions = new ArrayList<>();
     _partitionsV2 = new ArrayList<>(partitionsV2);
 
-    _zkAdapter = dependentTask._zkAdapter;
-    _eventProducer = dependentTask._eventProducer;
-    _checkpoints = dependentTask._checkpoints;
-    _transportProviderName = dependentTask._transportProviderName;
-    _destinationSerDes = dependentTask._destinationSerDes;
+    _zkAdapter = predecessor._zkAdapter;
+    _eventProducer = predecessor._eventProducer;
+    _checkpoints = predecessor._checkpoints;
+    _transportProviderName = predecessor._transportProviderName;
+    _destinationSerDes = predecessor._destinationSerDes;
 
-    _dependentTasks = new ArrayList<>();
-    _dependentTasks.add(dependentTask.getDatastreamTaskName());
-    if (!dependentTask.isLocked()) {
-      _dependentTasks.addAll(dependentTask._dependentTasks);
+    _dependencies = new ArrayList<>();
+    _dependencies.add(predecessor.getDatastreamTaskName());
+    if (!predecessor.isLocked()) {
+      _dependencies.addAll(predecessor.getDependencies());
     }
   }
 
@@ -287,7 +287,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   @Override
   public void acquire(Duration timeout) {
     Validate.notNull(_zkAdapter, "Task is not properly initialized for processing.");
-    if (!_dependentTasks.isEmpty()) {
+    if (!_dependencies.isEmpty()) {
       _zkAdapter.waitForDependencies(this, timeout);
     }
     try {
@@ -422,7 +422,7 @@ public class DatastreamTaskImpl implements DatastreamTask {
   public String toString() {
     // toString() is mainly for logging purpose, feel free to modify the content/format
     return String.format("%s(%s), partitionsV2=%s, partitions=%s, dependencies=%s", getDatastreamTaskName(), _connectorType,
-        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions), _dependentTasks);
+        String.join(",", _partitionsV2), LogUtils.logNumberArrayInRange(_partitions), _dependencies);
   }
 
   public void setZkAdapter(ZkAdapter adapter) {
@@ -440,15 +440,15 @@ public class DatastreamTaskImpl implements DatastreamTask {
   }
 
 
-  public List<String> getDependentTasks() {
-    return _dependentTasks;
+  public List<String> getDependencies() {
+    return _dependencies;
   }
 
   /**
    * Add an dependent task to this task
    */
   public void addDependentTask(String taskName) {
-    _dependentTasks.add(taskName);
+    _dependencies.add(taskName);
   }
 
 }

@@ -105,8 +105,4 @@ public class DatastreamMetadataConstants {
    */
   public static final String GROUP_ID = "group.id";
 
-  /**
-   * Key to use Brooklin for partition assignment
-   */
-  public static final String USE_BROOKLIN_PARTITION_ASSIGNMENT = "system.performPartitionAssignment";
 }

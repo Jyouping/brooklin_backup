@@ -37,6 +37,7 @@ public class CoordinatorEvent {
       new CoordinatorEvent(EventType.HANDLE_ADD_OR_DELETE_DATASTREAM);
   public static final CoordinatorEvent HEARTBEAT_EVENT = new CoordinatorEvent(EventType.HEARTBEAT);
   protected final EventType _eventType;
+
   protected final Optional<String> _datastreamGroupName;
 
   private CoordinatorEvent(EventType eventType) {
@@ -99,6 +100,10 @@ public class CoordinatorEvent {
    */
   public static HandleInstanceError createHandleInstanceErrorEvent(String errorMessage) {
     return new HandleInstanceError(errorMessage);
+  }
+
+  public Optional<String> getDatastreamGroupName() {
+    return _datastreamGroupName;
   }
 
   public EventType getType() {
