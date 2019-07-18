@@ -162,8 +162,11 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   private static final String NUM_RETRIES = "numRetries";
   private static final String NUM_HEARTBEATS = "numHeartbeats";
   private static final String NUM_ASSIGNMENT_CHANGES = "numAssignmentChanges";
-  private static final String IS_LEADER = "isLeader";
+  private static final String NUM_PARTITION_ASSIGNMENTS = "numPartitionAssignments";
+  private static final String NUM_PARTITION_MOVEMENTS = "numPartitionMovements";
   private static final String NUM_PAUSED_DATASTREAMS_GROUPS = "numPausedDatastreamsGroups";
+  private static final String MAX_PARTITION_COUNT_IN_TASK = "maxPartitionCountInTask";
+  private static final String IS_LEADER = "isLeader";
 
   // Connector common metrics
   private static final String NUM_DATASTREAMS = "numDatastreams";
@@ -920,7 +923,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     try {
       List<DatastreamGroup> datastreamGroups = fetchDatastreamGroups();
 
-      registerPartitionListener(datastreamGroups);
+      onDatastreamChange(datastreamGroups);
 
       _log.debug("handleLeaderDoAssignment: final datastreams for task assignment: {}", datastreamGroups);
 
@@ -1009,7 +1012,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     // schedule retry if failure
     if (succeeded) {
       _adapter.cleanupOldUnusedTasks(previousAssignmentByInstance, newAssignmentsByInstance);
-      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_REBALANCES, 1);
+      getMaxPartitionCountInTask(newAssignmentsByInstance);
+      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_PARTITION_ASSIGNMENTS, 1);
     } else if (!leaderPartitionAssignmentScheduled.get() && datastreamGroupName.isPresent()) {
       _log.info("Schedule retry for leader assigning tasks");
       _dynamicMetricsManager.createOrUpdateMeter(MODULE, "handleLeaderPartitionAssignment", NUM_RETRIES, 1);
@@ -1019,6 +1023,15 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
         leaderPartitionAssignmentScheduled.set(false);
       }, _config.getRetryIntervalMs(), TimeUnit.MILLISECONDS);
     }
+  }
+
+  private void getMaxPartitionCountInTask(Map<String, List<DatastreamTask>> assignments) {
+    long maxPartitionCount = 0;
+    for (List<DatastreamTask> tasks : assignments.values()) {
+      maxPartitionCount = Math.max(maxPartitionCount,
+          tasks.stream().map(DatastreamTask::getPartitionsV2).map(List::size).mapToInt(v -> v).max().orElse(0));
+    }
+    _dynamicMetricsManager.createOrUpdateMeter(MODULE, MAX_PARTITION_COUNT_IN_TASK, maxPartitionCount);
   }
 
   private void performPartitionMovement() {
@@ -1071,12 +1084,13 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     }
     if (succeeded) {
       _adapter.cleanupOldUnusedTasks(previousAssignmentByInstance, newAssignmentsByInstance);
-      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_REBALANCES, 1);
+      getMaxPartitionCountInTask(newAssignmentsByInstance);
+      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_PARTITION_MOVEMENTS, 1);
     }
   }
 
-  private void registerPartitionListener(List<DatastreamGroup> datastreamGroups) {
-    //We need to onDatastreamChange only active datastream for partition listener
+  private void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
+    //We need to perform onDatastreamChange only active datastream for partition listening
     List<DatastreamGroup> activeDataStreams = datastreamGroups.stream().filter(dg -> !dg.isPaused()).collect(Collectors.toList());
 
     for (String connectorType : _connectors.keySet()) {
@@ -1416,6 +1430,9 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
   public List<BrooklinMetricInfo> getMetricInfos() {
     _metrics.add(new BrooklinMeterInfo(buildMetricName(MODULE, NUM_REBALANCES)));
     _metrics.add(new BrooklinMeterInfo(buildMetricName(MODULE, NUM_ASSIGNMENT_CHANGES)));
+    _metrics.add(new BrooklinMeterInfo(buildMetricName(MODULE, NUM_PARTITION_ASSIGNMENTS)));
+    _metrics.add(new BrooklinMeterInfo(buildMetricName(MODULE, NUM_PARTITION_MOVEMENTS)));
+    _metrics.add(new BrooklinMeterInfo(buildMetricName(MODULE, MAX_PARTITION_COUNT_IN_TASK)));
     _metrics.add(new BrooklinMeterInfo(getDynamicMetricPrefixRegex(MODULE) + NUM_ERRORS));
     _metrics.add(new BrooklinMeterInfo(getDynamicMetricPrefixRegex(MODULE) + NUM_RETRIES));
     _metrics.add(new BrooklinCounterInfo(buildMetricName(MODULE, NUM_HEARTBEATS)));

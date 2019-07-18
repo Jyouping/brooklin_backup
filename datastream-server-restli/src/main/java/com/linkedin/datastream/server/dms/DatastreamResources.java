@@ -347,7 +347,7 @@ public class DatastreamResources extends CollectionResourceTemplate<String, Data
     List<String> targetPartitions = Arrays.asList(partitions.split(","));
     TargetAssignment targetAssignment = new TargetAssignment(targetPartitions, host);
     try {
-      _store.updateDatastreamPartitions(datastream.getName(), datastream, targetAssignment);
+      _store.updatePartitionAssignments(datastream.getName(), datastream, targetAssignment);
     } catch (Exception ex) {
       LOG.error("Error to move partitions", ex);
       _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_500_INTERNAL_SERVER_ERROR,

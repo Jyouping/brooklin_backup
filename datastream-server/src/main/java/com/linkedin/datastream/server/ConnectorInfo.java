@@ -30,7 +30,6 @@ public class ConnectorInfo {
 
   private CheckpointProvider _checkpointProvider;
 
-
   /**
    * Store authorizerName because authorizer might be initialized later
    */

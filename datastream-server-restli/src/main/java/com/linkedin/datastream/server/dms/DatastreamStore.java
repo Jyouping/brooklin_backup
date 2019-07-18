@@ -50,5 +50,5 @@ public interface DatastreamStore {
    * update the target assignment info for a particular datastream
    * @throws DatastreamException
    */
-  void updateDatastreamPartitions(String key, Datastream datastream, TargetAssignment targetAssignment) throws DatastreamException;
+  void updatePartitionAssignments(String key, Datastream datastream, TargetAssignment targetAssignment) throws DatastreamException;
 }

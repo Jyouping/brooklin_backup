@@ -115,7 +115,7 @@ public class ZookeeperBackedDatastreamStore implements DatastreamStore {
   }
 
   @Override
-  public void updateDatastreamPartitions(String key, Datastream datastream, TargetAssignment targetAssignment)
+  public void updatePartitionAssignments(String key, Datastream datastream, TargetAssignment targetAssignment)
   {
     Validate.notNull(datastream, "null datastream");
     Validate.notNull(key, "null key for datastream" + datastream);
