@@ -156,7 +156,7 @@ public class TestKafkaConnector extends BaseKafkaZkTest {
 
     Coordinator coordinator = TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(), clusterName);
     coordinator.addConnector("Kafka", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null);
+        new SourceBasedDeduper(), null, false);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);
