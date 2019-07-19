@@ -19,6 +19,7 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamMetadataConstants;
@@ -59,6 +60,33 @@ public class TestStickyPartitionAssignment {
       Assert.assertEquals(task.getPartitionsV2().size(), 1);
     }
   }
+
+  @Test
+  public void testMovePartition() {
+    StickyPartitionAssignmentStrategy strategy = new StickyPartitionAssignmentStrategy();
+    List<DatastreamGroup> datastreams = generateDatastreams("ds", 1);
+    Map<String, Set<DatastreamTask>> assignment = generateEmptyAssignment(datastreams, 3, 2);
+    List<String> partitions = ImmutableList.of("t-0", "t-1", "t-2", "t-3", "t-4");
+    DatastreamPartitionsMetadata partitionsMetadata =
+        new DatastreamPartitionsMetadata(datastreams.get(0).getTaskPrefix(), partitions);
+    // Generate partition assignment
+    assignment = strategy.assignPartitions(assignment, partitionsMetadata);
+
+
+    Map<String, Set<String>> targetAssignment = new HashMap<>();
+    targetAssignment.put("instance2", ImmutableSet.of("t-3", "t-2", "t-1", "t-5"));
+    targetAssignment.put("instance1", ImmutableSet.of("t-0"));
+
+    assignment = strategy.movePartitions(assignment, targetAssignment, partitionsMetadata);
+
+    Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-1"));
+    Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-2"));
+    Assert.assertTrue(getPartitionsFromTask(assignment.get("instance2")).contains("t-3"));
+
+
+    Assert.assertEquals(getTotalPartitions(assignment), 5);
+  }
+
 
   @Test
   public void testRemovePartitions() {

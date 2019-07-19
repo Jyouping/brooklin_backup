@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -99,6 +100,83 @@ public class StickyPartitionAssignmentStrategy {
     LOG.info("new assignment info, assignment: {}, all partitions: {}", newAssignment, allPartitions);
 
     sanityChecks(newAssignment, allPartitions);
+    return newAssignment;
+  }
+
+  /**
+   * Move a partition for a datastream group according to the suggestAssignment
+   *
+   * @param currentAssignment the old assignment
+   * @param targetAssignment the target assignment retrieved from Zookeeper
+   * @param allPartitions the subscribed partitions received from partition listener
+   * @return new assignment
+   */
+  public Map<String, Set<DatastreamTask>> movePartitions(Map<String, Set<DatastreamTask>> currentAssignment,
+      Map<String, Set<String>> targetAssignment, DatastreamPartitionsMetadata allPartitions) {
+
+    LOG.info("Try to move partition, task: {}, target assignment: {}, all partitions: {}", currentAssignment,
+        targetAssignment, allPartitions);
+
+    String dgName = allPartitions.getDatastreamGroupName();
+    Map<String, Set<DatastreamTask>> newAssignment = new HashMap<>(currentAssignment);
+
+    Set<String> toReassignPartitions = new HashSet<>();
+    targetAssignment.values().stream().forEach(toReassignPartitions::addAll);
+    toReassignPartitions.retainAll(allPartitions.getPartitions());
+
+    //construct a map to store moved partition, key: partition name, value: source task name
+    Map<String, String> partitionMovementSourceMap = new HashMap<>();
+
+    //Release a partition into the map
+    newAssignment.keySet().stream().forEach(instance -> {
+      Set<DatastreamTask> prevTasks = currentAssignment.get(instance);
+      Set<DatastreamTask> newTasks = prevTasks.stream().map(task -> {
+        if (!dgName.equals(task.getTaskPrefix())) {
+          return task;
+        }
+        Set<String> movedPartitions = new HashSet<>(task.getPartitionsV2());
+        movedPartitions.retainAll(toReassignPartitions);
+        if (!movedPartitions.isEmpty()) {
+          movedPartitions.stream().forEach(p -> partitionMovementSourceMap.put(p, task.getDatastreamTaskName()));
+          List<String> partitions = new ArrayList<>(task.getPartitionsV2());
+          partitions.removeAll(movedPartitions);
+          return new DatastreamTaskImpl((DatastreamTaskImpl) task, partitions);
+        } else {
+          return task;
+        }
+      }).filter(t -> t != null).collect(Collectors.toSet());
+      newAssignment.put(instance, newTasks);
+    });
+
+    //Assign the movement Info
+    targetAssignment.forEach((inst, partitions) -> {
+      Set<String> confirmedPartitions = partitions.stream().filter(partitionMovementSourceMap::containsKey)
+          .collect(Collectors.toSet());
+
+      //find a task with small number of partitions on that instance
+
+      Optional<DatastreamTask> toAssignTask;
+      if (newAssignment.containsKey(inst)) {
+        Set<DatastreamTask> dgTasks = newAssignment.get(inst).stream().filter(t -> dgName.equals(t.getTaskPrefix()))
+            .collect(Collectors.toSet());
+        toAssignTask = dgTasks.stream().reduce((task1, task2) ->
+            task1.getPartitionsV2().size() < task2.getPartitionsV2().size() ? task1 : task2);
+      } else {
+        toAssignTask = Optional.empty();
+      }
+
+      DatastreamTask task = toAssignTask.orElseThrow(() ->
+          new DatastreamRuntimeException("No task is allocated in instance " + inst));
+      newAssignment.get(inst).remove(task);
+      List<String> newPartitions = new ArrayList<>(task.getPartitionsV2());
+      newPartitions.addAll(confirmedPartitions);
+      DatastreamTaskImpl newTask = new DatastreamTaskImpl((DatastreamTaskImpl) task, newPartitions);
+      confirmedPartitions.stream().forEach(p -> newTask.addDependentTask(partitionMovementSourceMap.get(p)));
+      newAssignment.get(inst).add(newTask);
+    });
+
+    sanityChecks(newAssignment, allPartitions);
+    LOG.info("assignment info, task: {}", newAssignment);
     return newAssignment;
   }
 

@@ -19,6 +19,7 @@ import com.linkedin.datastream.common.DatastreamStatus;
 import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.common.zk.ZkClient;
 import com.linkedin.datastream.server.CachedDatastreamReader;
+import com.linkedin.datastream.server.TargetAssignment;
 import com.linkedin.datastream.server.zk.KeyBuilder;
 
 /**
@@ -112,6 +113,32 @@ public class ZookeeperBackedDatastreamStore implements DatastreamStore {
     String json = DatastreamUtils.toJSON(datastream);
     _zkClient.writeData(path, json);
   }
+
+  @Override
+  public void updatePartitionAssignments(String key, Datastream datastream, TargetAssignment targetAssignment)
+  {
+    Validate.notNull(datastream, "null datastream");
+    Validate.notNull(key, "null key for datastream" + datastream);
+
+    long current = System.currentTimeMillis();
+    String datastreamGroupName  = DatastreamUtils.getTaskPrefix(datastream);
+    String path = KeyBuilder.getTargetAssignment(_cluster, datastreamGroupName);
+    _zkClient.ensurePath(path);
+    if (_zkClient.exists(path)) {
+      String json = targetAssignment.toJson();
+      _zkClient.ensurePath(path + '/' + current);
+      _zkClient.writeData(path + '/' + current, json);
+    }
+
+    try {
+      _zkClient.writeData(KeyBuilder.getTargetAssignmentBase(_cluster), String.valueOf(System.currentTimeMillis()));
+    } catch (Exception e) {
+      // we don't need to do an atomic update; if the node gets update by others somehow or get deleted by
+      // leader, it's ok to ignore the failure
+      LOG.warn("Failed to touch the assignment update", e);
+    }
+  }
+
 
   @Override
   public void deleteDatastream(String key) {

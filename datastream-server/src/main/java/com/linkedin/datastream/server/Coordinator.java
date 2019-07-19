@@ -412,6 +412,12 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _log.info("Coordinator::onDatastreamUpdate completed successfully");
   }
 
+  @Override
+  public void onPartitionMovement() {
+    _log.info("Coordinator::onPartitionMovement is called");
+    _eventQueue.put(CoordinatorEvent.createPartitionMovementEvent());
+    _log.info("Coordinator::onPartitionMovement completed successfully");
+  }
   /**
    * {@inheritDoc}
    *
@@ -678,6 +684,10 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
         case LEADER_PARTITION_ASSIGNMENT:
           performPartitionAssignment(event.getDatastreamGroupName());
+          break;
+
+        case LEADER_PARTITION_MOVEMENT:
+          performPartitionMovement();
           break;
 
         default:
@@ -1024,6 +1034,60 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     _dynamicMetricsManager.createOrUpdateMeter(MODULE, MAX_PARTITION_COUNT_IN_TASK, maxPartitionCount);
   }
 
+  private void performPartitionMovement() {
+    boolean succeeded = false;
+    Map<String, Set<DatastreamTask>> previousAssignmentByInstance = new HashMap<>();
+    Map<String, List<DatastreamTask>> newAssignmentsByInstance = new HashMap<>();
+    try {
+      previousAssignmentByInstance = _adapter.getAllAssignedDatastreamTasks();
+      Map<String, Set<DatastreamTask>> assignmentByInstance = new HashMap<>(previousAssignmentByInstance);
+
+      // retrieve the datastreamGroups for validation
+      List<String> datastreamGroups = fetchDatastreamGroups().stream().map(DatastreamGroup::getTaskPrefix)
+          .collect(Collectors.toList());
+
+      List<String> toProcessDatastreams = _adapter.getDatastreamsNeedPartitionMovement();
+
+      StickyPartitionAssignmentStrategy partitionAssignmentStrategy = new StickyPartitionAssignmentStrategy();
+
+      for (String connectorType : _connectors.keySet()) {
+        Connector connectorInstance = _connectors.get(connectorType).getConnector().getConnectorInstance();
+        Map<String, Optional<DatastreamPartitionsMetadata>> datastreamPartitions =
+            connectorInstance.getDatastreamPartitions();
+
+        datastreamGroups.retainAll(datastreamPartitions.keySet());
+        //Processed datastream with assignment info only
+        datastreamGroups.retainAll(toProcessDatastreams);
+
+        for (String dgName : datastreamGroups) {
+
+          DatastreamPartitionsMetadata subscribedPartitions = connectorInstance.getDatastreamPartitions().get(dgName)
+              .orElseThrow(() -> new RuntimeException("partition listener is not ready yet for datastream " + dgName));
+          Map<String, Set<String>> suggestedAssignment = _adapter.getPartitionMovement(dgName);
+           assignmentByInstance = partitionAssignmentStrategy.movePartitions(assignmentByInstance,
+               suggestedAssignment, subscribedPartitions);
+          _adapter.cleanUpPartitionMovement(dgName);
+        }
+      }
+
+      _log.info("Partition movement completed: datastreamGroup, assignment {} ", assignmentByInstance);
+      for (String key : assignmentByInstance.keySet()) {
+        newAssignmentsByInstance.put(key, new ArrayList<>(assignmentByInstance.get(key)));
+      }
+      _adapter.updateAllAssignments(newAssignmentsByInstance);
+
+      succeeded = true;
+
+    } catch (Exception ex) {
+      //We don't retry if there is any exceptions
+      _log.info("Partition movement failed, Exception: ", ex);
+    }
+    if (succeeded) {
+      _adapter.cleanupOldUnusedTasks(previousAssignmentByInstance, newAssignmentsByInstance);
+      getMaxPartitionCountInTask(newAssignmentsByInstance);
+      _dynamicMetricsManager.createOrUpdateMeter(MODULE, NUM_PARTITION_MOVEMENTS, 1);
+    }
+  }
 
   private void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
     //We need to perform onDatastreamChange only active datastream for partition listening
@@ -1475,3 +1539,4 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
     }
   }
 }
+
