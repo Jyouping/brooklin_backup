@@ -104,7 +104,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   // variables for flushless mode and flow control
   private final boolean _isFlushlessModeEnabled;
   private final boolean _isIdentityMirroringEnabled;
-  private final boolean _useBrooklinForPartitionAssignment;
+  private final boolean _enablePartitionAssignment;
   private FlushlessEventProducerHandler<Long> _flushlessProducer = null;
   private boolean _flowControlEnabled = false;
   private long _maxInFlightMessagesThreshold;
@@ -131,10 +131,10 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
     _isFlushlessModeEnabled = isFlushlessModeEnabled;
     _isIdentityMirroringEnabled = KafkaMirrorMakerDatastreamMetadata.isIdentityPartitioningEnabled(_datastream);
     _groupIdConstructor = groupIdConstructor;
-    _useBrooklinForPartitionAssignment = config.isUseBrooklinForPartitionAssignment();
+    _enablePartitionAssignment = config.getEnablePartitionAssignment();
 
-    if (_useBrooklinForPartitionAssignment) {
-      LOG.info("Use Brooklin for partition assignment");
+    if (_enablePartitionAssignment) {
+      LOG.info("Enable Brooklin partition assignment");
     }
 
     if (_isFlushlessModeEnabled) {
@@ -185,7 +185,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
   @Override
   protected void consumerSubscribe() {
-    if (_useBrooklinForPartitionAssignment) {
+    if (_enablePartitionAssignment) {
       Set<TopicPartition> topicPartition  = getAssignedTopicPartitionFromTask();
       updateConsumerAssignment(topicPartition);
       _consumer.assign(_consumerAssignment);
@@ -290,7 +290,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
   @Override
   public void run() {
-    if (_useBrooklinForPartitionAssignment) {
+    if (_enablePartitionAssignment) {
       _datastreamTask.acquire(ACQUIRE_TIMEOUT);
     }
     super.run();
@@ -300,7 +300,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
   public void stop() {
     super.stop();
     _topicManager.stop();
-    if (_useBrooklinForPartitionAssignment) {
+    if (_enablePartitionAssignment) {
       _datastreamTask.release();
     }
   }
@@ -344,7 +344,7 @@ public class KafkaMirrorMakerConnectorTask extends AbstractKafkaBasedConnectorTa
 
   @Override
   protected ConsumerRecords<?, ?> consumerPoll(long pollInterval) {
-    if (_useBrooklinForPartitionAssignment) {
+    if (_enablePartitionAssignment) {
       if (!_consumerAssignment.isEmpty()) {
         return _consumer.poll(pollInterval);
       } else {

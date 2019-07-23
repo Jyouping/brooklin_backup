@@ -1100,7 +1100,7 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
           .filter(x -> x.getConnectorName().equals(connectorType))
           .collect(Collectors.toList());
 
-      connectorWrapper.getConnectorInstance().onDatastreamChange(datastreamsPerConnectorType);
+      connectorWrapper.getConnectorInstance().handleDatastream(datastreamsPerConnectorType);
     }
   }
 
@@ -1211,8 +1211,8 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
 
     if (enablePartitionAssignment) {
-      connector.subscribePartitionChange(datastreamGroupName ->
-        _eventQueue.put(CoordinatorEvent.createLeaderPartitionAssignmentEvent(datastreamGroupName))
+      connector.onPartitionChange(datastreamGroup ->
+        _eventQueue.put(CoordinatorEvent.createLeaderPartitionAssignmentEvent(datastreamGroup.getTaskPrefix()))
       );
     }
 
@@ -1230,6 +1230,14 @@ public class Coordinator implements ZkAdapter.ZkAdapterListener, MetricsAware {
 
     _metrics.add(new BrooklinGaugeInfo(MetricRegistry.name(connectorName, NUM_DATASTREAMS)));
     _metrics.add(new BrooklinGaugeInfo(MetricRegistry.name(connectorName, NUM_DATASTREAM_TASKS)));
+  }
+
+  /**
+   * Add a connector to the coordinator with partitionAssignment to be disabled
+   */
+  public void addConnector(String connectorName, Connector connector, AssignmentStrategy strategy,
+      boolean customCheckpointing, DatastreamDeduper deduper, String authorizerName) {
+    addConnector(connectorName, connector, strategy, customCheckpointing, deduper, authorizerName, false);
   }
 
   /**

@@ -171,7 +171,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     Coordinator coordinator =
         TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(), "testPopulateDatastreamDestination");
     coordinator.addConnector("KafkaMirrorMaker", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(),  null, false);
+        new SourceBasedDeduper(),  null);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);
@@ -204,7 +204,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     Coordinator coordinator = TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(),
         "testValidateDatastreamUpdatePausedPartitions");
     coordinator.addConnector("KafkaMirrorMaker", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(),  null, false);
+        new SourceBasedDeduper(),  null);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);
@@ -603,7 +603,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     datastreamGroups1.add(group);
 
     AtomicInteger partitionChangeCalls = new AtomicInteger(0);
-    connector.subscribePartitionChange(groupName -> {
+    connector.onPartitionChange(groupName -> {
       if (groupName.equals(group.getTaskPrefix())) {
         partitionChangeCalls.incrementAndGet();
       }
@@ -611,7 +611,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
 
     connector.start(null);
 
-    connector.onDatastreamChange(datastreamGroups1);
+    connector.handleDatastream(datastreamGroups1);
     PollUtils.poll(() -> partitionChangeCalls.get() == 1, POLL_PERIOD_MS, POLL_TIMEOUT_MS);
     Map<String, Optional<DatastreamPartitionsMetadata>> partitionInfo = connector.getDatastreamPartitions();
     Assert.assertEquals(partitionInfo.get(group.getTaskPrefix()).get().getDatastreamGroupName(), group.getTaskPrefix());
@@ -640,7 +640,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     datastreamGroups1.add(new DatastreamGroup(ImmutableList.of(datastream1)));
 
     //subscribe callback
-    connector.onDatastreamChange(datastreamGroups1);
+    connector.handleDatastream(datastreamGroups1);
     Map<String, Optional<DatastreamPartitionsMetadata>> partitionInfo = connector.getDatastreamPartitions();
 
     Assert.assertEquals(partitionInfo.keySet(), Collections.EMPTY_SET);
@@ -662,9 +662,9 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     datastreamGroups1.add(new DatastreamGroup(ImmutableList.of(datastream1)));
 
     //subscribe callback
-    connector.subscribePartitionChange(t -> { });
+    connector.onPartitionChange(t -> { });
 
-    connector.onDatastreamChange(datastreamGroups1);
+    connector.handleDatastream(datastreamGroups1);
 
     Map<String, Optional<DatastreamPartitionsMetadata>> partitionInfo = connector.getDatastreamPartitions();
     Assert.assertEquals(partitionInfo.keySet(),
@@ -675,7 +675,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     datastreamGroups2.add(new DatastreamGroup(ImmutableList.of(datastream1)));
     datastreamGroups2.add(new DatastreamGroup(ImmutableList.of(datastream2)));
 
-    connector.onDatastreamChange(datastreamGroups2);
+    connector.handleDatastream(datastreamGroups2);
     partitionInfo = connector.getDatastreamPartitions();
 
     Assert.assertEquals(partitionInfo.keySet(),
@@ -685,7 +685,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     List<DatastreamGroup> datastreamGroups3 = new ArrayList<>();
     datastreamGroups3.add(new DatastreamGroup(ImmutableList.of(datastream2)));
 
-    connector.onDatastreamChange(datastreamGroups3);
+    connector.handleDatastream(datastreamGroups3);
     partitionInfo = connector.getDatastreamPartitions();
 
     Assert.assertEquals(partitionInfo.keySet(),
@@ -711,7 +711,7 @@ public class TestKafkaMirrorMakerConnector extends BaseKafkaZkTest {
     KafkaMirrorMakerConnector connector = new KafkaMirrorMakerConnector("MirrorMakerConnector", config, clusterName);
     Coordinator coordinator = TestKafkaConnectorUtils.createCoordinator(_kafkaCluster.getZkConnection(), clusterName);
     coordinator.addConnector("KafkaMirrorMaker", connector, new BroadcastStrategy(Optional.empty()), false,
-        new SourceBasedDeduper(), null, false);
+        new SourceBasedDeduper(), null);
     String transportProviderName = "kafkaTransportProvider";
     KafkaTransportProviderAdmin transportProviderAdmin =
         TestKafkaConnectorUtils.createKafkaTransportProviderAdmin(_kafkaCluster);

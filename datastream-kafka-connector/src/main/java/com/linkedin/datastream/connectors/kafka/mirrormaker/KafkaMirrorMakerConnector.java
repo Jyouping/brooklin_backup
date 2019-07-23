@@ -62,7 +62,7 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
   private final KafkaConsumerFactory<?, ?> _listenerConsumerFactory;
   private final Map<String, PartitionDiscoveryThread> _partitionDiscoveryThreadMap = new HashMap<>();
   private final Properties _consumerProperties;
-  private java.util.function.Consumer<String> _partitionChangeCallback;
+  private java.util.function.Consumer<DatastreamGroup> _partitionChangeCallback;
   private boolean _shutdown;
 
   /**
@@ -143,7 +143,7 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
   }
 
   @Override
-  public void subscribePartitionChange(java.util.function.Consumer<String> callback) {
+  public void onPartitionChange(java.util.function.Consumer<DatastreamGroup> callback) {
     _partitionChangeCallback = callback;
   }
 
@@ -170,7 +170,7 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
 
 
   @Override
-  public void onDatastreamChange(List<DatastreamGroup> datastreamGroups) {
+  public void handleDatastream(List<DatastreamGroup> datastreamGroups) {
     List<String> dgNames = datastreamGroups.stream().map(DatastreamGroup::getTaskPrefix).collect(Collectors.toList());
     List<String> obsoleteDgs = new ArrayList<>(_partitionDiscoveryThreadMap.keySet());
     obsoleteDgs.removeAll(dgNames);
@@ -179,21 +179,20 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
       Optional.ofNullable(_partitionDiscoveryThreadMap.remove(name)).ifPresent(Thread::interrupt);
     });
 
-    // add new datatreams
     datastreamGroups.stream().forEach(datastreamGroup -> {
       String datastreamGroupName = datastreamGroup.getTaskPrefix();
       PartitionDiscoveryThread partitionDiscoveryThread;
       if (_partitionDiscoveryThreadMap.containsKey(datastreamGroupName)) {
         partitionDiscoveryThread = _partitionDiscoveryThreadMap.get(datastreamGroupName);
-        partitionDiscoveryThread.setDatastream(datastreamGroup.getDatastreams().get(0));
+        partitionDiscoveryThread.setDatastreamGroup(datastreamGroup);
       } else {
         //We dont need to register the thread if no partition callback is available
         if (_partitionChangeCallback != null) {
           partitionDiscoveryThread =
-              new PartitionDiscoveryThread(datastreamGroup.getTaskPrefix(), datastreamGroup.getDatastreams().get(0));
+              new PartitionDiscoveryThread(datastreamGroup);
           partitionDiscoveryThread.start();
           _partitionDiscoveryThreadMap.put(datastreamGroupName, partitionDiscoveryThread);
-          LOG.info("PartitionListener for {} registered", datastreamGroupName);
+          LOG.info("DatastreamChangeListener for {} registered", datastreamGroupName);
         }
       }
     });
@@ -201,25 +200,23 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
 
   class PartitionDiscoveryThread extends Thread {
     private Consumer<?, ?> _consumer;
-    private Datastream _datastream;
-    private String _datastreamGroupName;
+    private DatastreamGroup _datastreamGroup;
     private List<String> _subscribedPartitions = new ArrayList<>();
     private Pattern _topicPattern;
     private boolean _initialized;
 
 
-    private PartitionDiscoveryThread(String datastreamGroupName, Datastream datastream) {
-      _datastream  = datastream;
-      _datastreamGroupName = datastreamGroupName;
+    private PartitionDiscoveryThread(DatastreamGroup datastreamGroup) {
+      _datastreamGroup = datastreamGroup;
       _topicPattern = Pattern.compile(
-          KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString()).getTopicName());
+          KafkaConnectionString.valueOf(_datastreamGroup.getDatastreams().get(0).getSource().getConnectionString()).getTopicName());
       _initialized = false;
     }
 
-    public void setDatastream(Datastream datastream) {
-      _datastream = datastream;
+    private void setDatastreamGroup(DatastreamGroup datastreamGroup) {
+      _datastreamGroup = datastreamGroup;
       _topicPattern = Pattern.compile(
-          KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString()).getTopicName());
+          KafkaConnectionString.valueOf(_datastreamGroup.getDatastreams().get(0).getSource().getConnectionString()).getTopicName());
     }
 
     private List<String> getPartitionsInfo() {
@@ -246,31 +243,32 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
 
     @Override
     public void run() {
+      Datastream datastream = _datastreamGroup.getDatastreams().get(0);
       String bootstrapValue = String.join(KafkaConnectionString.BROKER_LIST_DELIMITER,
-          KafkaConnectionString.valueOf(_datastream.getSource().getConnectionString())
+          KafkaConnectionString.valueOf(datastream.getSource().getConnectionString())
               .getBrokers().stream().map(KafkaBrokerAddress::toString).collect(Collectors.toList()));
       _consumer = createConsumer(_consumerProperties, bootstrapValue,
-          _groupIdConstructor.constructGroupId(_datastream) + DEST_CONSUMER_GROUP_ID_SUFFIX);
+          _groupIdConstructor.constructGroupId(datastream) + DEST_CONSUMER_GROUP_ID_SUFFIX);
 
-      LOG.info("Fetch thread for {} started", _datastream.getName());
+      LOG.info("Fetch thread for {} started", datastream.getName());
       while (!isInterrupted() && !_shutdown) {
         try {
           // If partition is changed
           List<String> newPartitionInfo = getPartitionsInfo();
           LOG.info("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
-              , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
+              , datastream.getName(), _subscribedPartitions, newPartitionInfo);
 
           if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
             LOG.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
-                , _datastream.getName(), _subscribedPartitions, newPartitionInfo);
+                , datastream.getName(), _subscribedPartitions, newPartitionInfo);
 
             _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
             _initialized = true;
-            _partitionChangeCallback.accept(_datastreamGroupName);
+            _partitionChangeCallback.accept(_datastreamGroup);
           }
           Thread.sleep(_partitionFetchIntervalMs);
         } catch (Throwable t) {
-          LOG.error("detect error for thread " + _datastream.getName() + ", ex: ", t);
+          LOG.error("detect error for thread " + datastream.getName() + ", ex: ", t);
         }
       }
 
@@ -278,7 +276,7 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
         _consumer.close();
       }
       _consumer = null;
-      LOG.info("Fetch thread for {} stopped", _datastream.getName());
+      LOG.info("Fetch thread for {} stopped", datastream.getName());
     }
   }
 }
